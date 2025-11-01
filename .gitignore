@@ -1,0 +1,135 @@
+# Environment Variables
+.env
+.env.local
+.env.*.local
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+go.work
+go.work.sum
+
+# Go build artifacts
+/backend/**/*.exe
+/backend/**/*.test
+/backend/**/bin/
+/backend/**/dist/
+/backend/**/tmp/
+
+# Air (Go live reload)
+tmp/
+.air.toml.lock
+
+# Frontend / Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Frontend build output
+dist/
+dist-ssr/
+*.local
+.vite/
+build/
+
+# IDE / Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+*.sublime-workspace
+.vscode/*
+!.vscode/extensions.json
+
+# OS Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# Docker
+.docker/
+docker-compose.override.yml
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+data/
+postgres-data/
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Testing
+coverage/
+*.cover
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+.hypothesis/
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup
+*~
+
+# Build artifacts
+/backend/services/*/main
+/backend/services/*/service
+*.a
+*.lib
+
+# Protobuf generated files (if you want to regenerate each time)
+# Uncomment if you prefer to gitignore generated proto files
+# **/*.pb.go
+# **/*_grpc.pb.go
+
+# Redis dump
+dump.rdb
+
+# Certificates
+*.pem
+*.key
+*.crt
+*.cert
+
+# Migration temporary files
+/backend/migrations/**/*.tmp
+
+# Application data
+uploads/
+storage/
+cache/
+
+# Compiled frontend CSS (if using Tailwind)
+/frontend/src/styles/output.css
+
+.cursor/
+/discuss/
