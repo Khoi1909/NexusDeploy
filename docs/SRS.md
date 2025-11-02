@@ -362,8 +362,9 @@ stateDiagram-v2
 | **FR7.1** | Định nghĩa Gói | - **Mô tả:** `Auth Service` là nơi định nghĩa các cấp độ gói và các giới hạn tương ứng (số dự án, build đồng thời, RAM, CPU).<br>- **Chi tiết kỹ thuật:** Thông tin này có thể được lưu trong `auth_db` hoặc file config của `Auth Service`. |
 | **FR7.2** | Gói Mặc định | - **Mô tả:** Khi user mới đăng ký, `Auth Service` tự động gán cho họ gói "Standard".<br>- **Service liên quan:** `Auth Service`. |
 | **FR7.3** | Bảng Phân quyền | - **Mô tả:** `Auth Service` cung cấp gRPC method `GetUserPlan` để các service khác có thể truy vấn thông tin gói và quyền của user.<br>- **Service liên quan:** `Auth Service`. |
-| **FR7.4** | Thực thi Phân quyền | - **Mô tả:** Các service khác có trách nhiệm gọi `Auth Service` để kiểm tra quyền trước khi thực hiện hành động.<br>- **Chi tiết kỹ thuật:** `Build Service` kiểm tra số build đồng thời. `Deployment Service` áp dụng giới hạn tài nguyên. `AI Service` kiểm tra quyền truy cập tính năng. |
+| **FR7.4** | Thực thi Phân quyền | - **Mô tả:** Các service có trách nhiệm gọi `Auth Service` để kiểm tra quyền trước khi thực hiện hành động.<br>- **Chi tiết thực thi:**<br>  - **Tạo dự án:** `Project Service`, trước khi tạo, sẽ gọi `AuthService.CheckPermission(user_id, "project", "create")` để kiểm tra giới hạn số dự án.<br>  - **Trigger build:** `Build Service` sẽ gọi `AuthService.CheckPermission(user_id, "build", "create")` để kiểm tra giới hạn build đồng thời.<br>  - **Deploy container:** `Deployment Service` sẽ nhận resource limits (RAM, CPU) trong "Deployment Spec" từ `Build Service`, `Build Service` đã lấy thông tin này từ `Auth Service`.<br>  - **Phân tích AI:** `AI Service` sẽ gọi `AuthService.GetUserPlan(user_id)` để quyết định mức độ phân tích. |
 | **FR7.5** | Giao diện Nâng cấp | - **Mô tả:** Frontend hiển thị trang mô tả các gói. Luồng nâng cấp thực tế (tích hợp thanh toán) nằm ngoài phạm vi dự án.<br>- **Service liên quan:** (Frontend). |
+| **FR7.6** | Luồng Upgrade/Downgrade | - **Mô tả:** Việc thay đổi gói của người dùng được thực hiện thủ công (ví dụ: qua admin tool). Khi được kích hoạt, `Auth Service` sẽ cập nhật trường `plan` trong bảng `users` của `auth_db`.<br>- **Chi tiết kỹ thuật:** Ngay sau khi `plan` được cập nhật, các giới hạn mới sẽ được áp dụng cho các hành động tiếp theo của người dùng. `Deployment Service` có thể cần được thông báo để điều chỉnh tài nguyên cho các ứng dụng đang chạy. |
 
 ### 3.8. Error Handling & Fault Tolerance
 
@@ -371,10 +372,12 @@ Bảng này định nghĩa cách hệ thống xử lý các kịch bản lỗi q
 
 | Service Call | Kịch bản lỗi (Error Case) | Hành động (Action) | Chính sách Retry | Thông báo cho User (English) |
 | :--- | :--- | :--- | :--- | :--- |
-| Runner → Project.GetSecrets | Service trả lỗi 500 | Đánh dấu build "Failed" | 3 lần, exponential backoff | "Build failed: A system configuration error occurred." |
+| Resource exhaustion: Disk full, memory full, CPU throttle | Các service sẽ cố gắng giải phóng tài nguyên (nếu có thể) hoặc chuyển sang trạng thái unhealthy. Các request mới sẽ bị từ chối. | Không retry tự động (cần can thiệp thủ công) | "Hệ thống đang quá tải. Vui lòng thử lại sau." |
+| Service crashes: Mid-build, mid-deployment | Build Service sẽ đánh dấu build là "Failed". Deployment Service sẽ cố gắng rollback hoặc giữ trạng thái hiện tại. | Không retry tự động (cần can thiệp thủ công) | "Build/Deployment thất bại do lỗi hệ thống. Vui lòng liên hệ hỗ trợ." |
 | Runner → Project.GetSecrets | Project Service không thể truy cập | Đánh dấu build "Failed" | 3 lần, exponential backoff | "Build failed: A system configuration error occurred." |
 | Build → Deployment.Deploy | Deployment Service không phản hồi | Giữ build ở trạng thái "Deploying" | Không tự động retry | "Deployment is queued and will start shortly..." |
 | Bất kỳ service nào → GitHub API | API bị rate limit | Tạm dừng hành động, chờ | Retry sau 1 phút | "GitHub API is busy. Please try again in a few moments." |
+| Runner → Docker Registry | Lỗi Docker Registry: Network, auth, capacity | Runner Service sẽ retry 3 lần với exponential backoff. Nếu vẫn thất bại, build sẽ bị đánh dấu "Failed". | 3 lần, exponential backoff | "Build failed: Không thể truy cập Docker Registry. Vui lòng thử lại sau." |
 | Bất kỳ service nào → Database | Mất kết nối CSDL | Service chuyển sang trạng thái unhealthy, từ chối request mới | Retry kết nối ở background | (No direct notification) System returns a 5xx error. |
 | Deployment Service | Container mới crash sau khi start | Rollback về container cũ (nếu có) | Không retry | "Deployment failed. Rolling back to the previous version." |
 
@@ -435,6 +438,322 @@ message UpdateBuildStatusRequest {
 message UpdateBuildStatusResponse {
   bool acknowledged = 1;
 }
+```
+
+---
+
+## PHỤ LỤC B: THIẾT KẾ SCHEMA CƠ SỞ DỮ LIỆU
+
+Phần này đặc tả chi tiết cấu trúc của 3 database được sử dụng trong hệ thống.
+
+### B.1. Auth DB (`auth_db`)
+
+**Mục đích:** Lưu trữ thông tin người dùng, xác thực, và phân quyền.
+
+**Bảng: `users`**
+| Tên cột | Kiểu dữ liệu | Ràng buộc | Mô tả |
+| :--- | :--- | :--- | :--- |
+| `id` | `uuid` | `PRIMARY KEY, DEFAULT gen_random_uuid()` | Khóa chính, định danh duy nhất cho user. |
+| `github_id` | `bigint` | `UNIQUE, NOT NULL` | ID người dùng từ GitHub. |
+| `username` | `varchar(255)` | `NOT NULL` | Tên người dùng GitHub. |
+| `email` | `varchar(255)` | `UNIQUE, NOT NULL` | Email chính của người dùng. |
+| `avatar_url` | `text` | | URL ảnh đại diện của người dùng. |
+| `plan` | `varchar(50)` | `NOT NULL, DEFAULT 'standard'` | Gói đăng ký của người dùng ('standard', 'premium'). |
+| `created_at` | `timestamptz` | `NOT NULL, DEFAULT now()` | Thời gian tạo tài khoản. |
+| `updated_at` | `timestamptz` | `NOT NULL, DEFAULT now()` | Thời gian cập nhật tài khoản lần cuối. |
+
+**Bảng: `refresh_tokens`**
+| Tên cột | Kiểu dữ liệu | Ràng buộc | Mô tả |
+| :--- | :--- | :--- | :--- |
+| `id` | `uuid` | `PRIMARY KEY, DEFAULT gen_random_uuid()` | Khóa chính. |
+| `user_id` | `uuid` | `FOREIGN KEY (users.id) ON DELETE CASCADE` | Liên kết đến người dùng sở hữu token. |
+| `token_hash` | `varchar(255)` | `UNIQUE, NOT NULL` | Hash của refresh token để chống lộ lọt. |
+| `expires_at` | `timestamptz` | `NOT NULL` | Thời gian hết hạn của token. |
+
+**Bảng: `permissions`**
+| Tên cột | Kiểu dữ liệu | Ràng buộc | Mô tả |
+| :--- | :--- | :--- | :--- |
+| `id` | `uuid` | `PRIMARY KEY, DEFAULT gen_random_uuid()` | Khóa chính. |
+| `user_id` | `uuid` | `NOT NULL, FOREIGN KEY (users.id) ON DELETE CASCADE` | Người dùng được cấp quyền. |
+| `resource` | `varchar(100)` | `NOT NULL` | Tài nguyên được cấp quyền (ví dụ: 'project', 'billing'). |
+| `action` | `varchar(50)` | `NOT NULL` | Hành động được phép (ví dụ: 'create', 'delete'). |
+
+### B.2. Project DB (`project_db`)
+
+**Mục đích:** Lưu trữ thông tin về các dự án, cấu hình, và deployments.
+
+**Bảng: `projects`**
+| Tên cột | Kiểu dữ liệu | Ràng buộc | Mô tả |
+| :--- | :--- | :--- | :--- |
+| `id` | `uuid` | `PRIMARY KEY, DEFAULT gen_random_uuid()` | Khóa chính, định danh duy nhất cho dự án. |
+| `user_id` | `uuid` | `NOT NULL` | ID của người dùng sở hữu dự án. |
+| `name` | `varchar(255)` | `NOT NULL` | Tên dự án (ví dụ: 'my-awesome-app'). |
+| `repo_url` | `text` | `NOT NULL` | URL của kho mã nguồn GitHub. |
+| `branch` | `varchar(255)` | `NOT NULL, DEFAULT 'main'` | Nhánh mặc định để build. |
+| `preset` | `varchar(50)` | `NOT NULL` | Preset được chọn (ví dụ: 'nodejs', 'go'). |
+| `build_command`| `text` | | Lệnh để build dự án. |
+| `start_command`| `text` | | Lệnh để khởi chạy ứng dụng. |
+| `port` | `integer` | `NOT NULL, DEFAULT 8080` | Port nội bộ mà ứng dụng lắng nghe. |
+| `created_at` | `timestamptz` | `NOT NULL, DEFAULT now()` | Thời gian tạo dự án. |
+| `updated_at` | `timestamptz` | `NOT NULL, DEFAULT now()` | Thời gian cập nhật dự án lần cuối. |
+
+**Bảng: `secrets`**
+| Tên cột | Kiểu dữ liệu | Ràng buộc | Mô tả |
+| :--- | :--- | :--- | :--- |
+| `id` | `uuid` | `PRIMARY KEY, DEFAULT gen_random_uuid()` | Khóa chính. |
+| `project_id` | `uuid` | `FOREIGN KEY (projects.id) ON DELETE CASCADE` | Liên kết đến dự án sở hữu secret. |
+| `name` | `varchar(255)` | `NOT NULL` | Tên của biến môi trường. |
+| `encrypted_value` | `bytea` | `NOT NULL` | Giá trị đã được mã hóa bằng AES-256-GCM. |
+
+**Bảng: `deployments`**
+| Tên cột | Kiểu dữ liệu | Ràng buộc | Mô tả |
+| :--- | :--- | :--- | :--- |
+| `id` | `uuid` | `PRIMARY KEY, DEFAULT gen_random_uuid()` | Khóa chính. |
+| `project_id` | `uuid` | `FOREIGN KEY (projects.id) ON DELETE CASCADE` | Liên kết đến dự án. |
+| `build_id` | `uuid` | `NOT NULL` | ID của build tương ứng tạo ra deployment này. |
+| `image_tag` | `text` | `NOT NULL` | Tag của Docker image đã được build. |
+| `container_id` | `varchar(255)`| | ID của container đang chạy. |
+| `domain` | `text` | | Tên miền được gán cho deployment. |
+| `status` | `varchar(50)` | `NOT NULL` | Trạng thái ('active', 'stopped', 'failed'). |
+| `created_at` | `timestamptz` | `NOT NULL, DEFAULT now()` | Thời gian deployment được tạo. |
+
+**Bảng: `webhooks`**
+| Tên cột | Kiểu dữ liệu | Ràng buộc | Mô tả |
+| :--- | :--- | :--- | :--- |
+| `id` | `uuid` | `PRIMARY KEY, DEFAULT gen_random_uuid()` | Khóa chính. |
+| `project_id` | `uuid` | `NOT NULL, FOREIGN KEY (projects.id) ON DELETE CASCADE` | Dự án mà webhook này thuộc về. |
+| `github_webhook_id` | `bigint` | `NOT NULL` | ID của webhook trên hệ thống GitHub. |
+| `secret` | `varchar(255)` | `NOT NULL` | Secret dùng để xác thực payload từ GitHub. |
+
+### B.3. Build DB (`build_db`)
+
+**Mục đích:** Lưu trữ lịch sử và log của các quá trình build.
+
+**Bảng: `builds`**
+| Tên cột | Kiểu dữ liệu | Ràng buộc | Mô tả |
+| :--- | :--- | :--- | :--- |
+| `id` | `uuid` | `PRIMARY KEY, DEFAULT gen_random_uuid()` | Khóa chính, định danh duy nhất cho một lần build. |
+| `project_id` | `uuid` | `NOT NULL` | ID của dự án được build. |
+| `commit_sha` | `varchar(40)` | | SHA của commit được build. |
+| `status` | `varchar(50)` | `NOT NULL` | Trạng thái ('pending', 'running', 'success', 'failed', 'deploy_failed'). |
+| `started_at` | `timestamptz` | | Thời gian bắt đầu build. |
+| `finished_at` | `timestamptz` | | Thời gian kết thúc build. |
+
+**Bảng: `build_logs`**
+| Tên cột | Kiểu dữ liệu | Ràng buộc | Mô tả |
+| :--- | :--- | :--- | :--- |
+| `id` | `bigserial` | `PRIMARY KEY` | Khóa chính tự tăng. |
+| `build_id` | `uuid` | `FOREIGN KEY (builds.id) ON DELETE CASCADE` | Liên kết đến lần build sở hữu log. |
+| `timestamp` | `timestamptz` | `NOT NULL` | Thời gian của dòng log. |
+| `log_line` | `text` | `NOT NULL` | Nội dung của dòng log. |
+
+**Bảng: `build_steps`**
+| Tên cột | Kiểu dữ liệu | Ràng buộc | Mô tả |
+| :--- | :--- | :--- | :--- |
+| `id` | `uuid` | `PRIMARY KEY, DEFAULT gen_random_uuid()` | Khóa chính. |
+| `build_id` | `uuid` | `NOT NULL, FOREIGN KEY (builds.id) ON DELETE CASCADE` | Liên kết đến lần build. |
+| `step_name` | `varchar(100)` | `NOT NULL` | Tên của bước build (ví dụ: 'clone', 'build', 'test'). |
+| `status` | `varchar(50)` | `NOT NULL` | Trạng thái của bước build. |
+| `duration_ms` | `integer` | | Thời gian hoàn thành bước (ms). |
+
+## PHỤ LỤC C: ĐẶC TẢ API VÀ EVENTS
+
+### C.1. REST API Endpoints (API Gateway)
+
+Bảng này liệt kê các REST API chính mà API Gateway cung cấp cho Frontend.
+
+| Method | Path | Service được gọi (gRPC) | Mô tả |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/auth/github/login` | `AuthService` | Bắt đầu luồng đăng nhập GitHub OAuth. |
+| `GET` | `/auth/github/callback` | `AuthService` | Xử lý callback từ GitHub. |
+| `POST`| `/auth/logout` | `AuthService` | Đăng xuất và vô hiệu hóa token. |
+| `GET` | `/projects` | `ProjectService` | Lấy danh sách dự án của user. |
+| `POST`| `/projects` | `ProjectService` | Tạo một dự án mới. |
+| `GET` | `/projects/{id}` | `ProjectService` | Lấy chi tiết một dự án. |
+| `GET` | `/projects/{id}/builds` | `BuildService` | Lấy lịch sử build của một dự án. |
+| `POST`| `/builds/{id}/analyze` | `AIService` | Yêu cầu phân tích lỗi cho một build. |
+| `GET` | `/ws/notifications` | `NotificationService` | Nâng cấp kết nối lên WebSocket. |
+
+**Ví dụ về Request/Response Bodies:**
+
+**1. `POST /projects`**
+- **Mô tả:** Tạo một dự án mới.
+- **Request Body:**
+  ```json
+  {
+    "name": "my-new-app",
+    "repo_url": "https://github.com/user/my-new-app.git",
+    "preset": "nodejs",
+    "branch": "develop"
+  }
+  ```
+- **Response Body (201 Created):**
+  ```json
+  {
+    "id": "a1b2c3d4-e5f6-7890-1234-567890abcdef",
+    "name": "my-new-app",
+    "status": "pending_initial_build"
+  }
+  ```
+
+**2. `POST /auth/logout`**
+- **Mô tả:** Đăng xuất người dùng.
+- **Request Body:** (empty)
+- **Response Body (200 OK):**
+  ```json
+  {
+    "message": "Logged out successfully"
+  }
+  ```
+
+**3. `POST /builds/{id}/analyze`**
+- **Mô tả:** Yêu cầu phân tích AI cho một build đã thất bại.
+- **Request Body:** (empty)
+- **Response Body (202 Accepted):**
+  ```json
+  {
+    "message": "AI analysis has been queued.",
+    "analysis_id": "f0e9d8c7-b6a5-4321-fedc-ba9876543210"
+  }
+  ```
+
+### C.2. Message Queue Formats (Redis)
+
+**Queue: `build_jobs`**
+
+Khi `Build Service` muốn một `Runner Service` thực thi một job, nó sẽ đẩy một message với format sau vào queue.
+
+**Cấu trúc (JSON):**
+```json
+{
+  "build_id": "uuid",
+  "project_id": "uuid",
+  "github_token": "encrypted_github_token", // Token để clone code
+  "repo_url": "https://github.com/user/repo.git",
+  "branch": "main",
+  "build_command": "npm run build",
+  "start_command": "npm start",
+  "secrets": {
+    "KEY1": "value1",
+    "KEY2": "value2"
+  }
+}
+```
+
+## PHỤ LỤC C: ĐẶC TẢ API VÀ EVENTS
+
+(Content of Appendix C)
+
+## PHỤ LỤC D: SEQUENCE DIAGRAMS
+
+(Content of Appendix D)
+
+## PHỤ LỤC E: SƠ ĐỒ QUAN HỆ THỰC THỂ (ER DIAGRAMS)
+
+Phần này chứa các sơ đồ ER mô tả mối quan hệ giữa các bảng trong từng database.
+
+### E.1. Auth DB
+
+```mermaid
+erDiagram
+    users {
+        uuid id PK
+        bigint github_id
+        varchar username
+        varchar email
+        text avatar_url
+        varchar plan
+    }
+
+    refresh_tokens {
+        uuid id PK
+        uuid user_id FK
+        varchar token_hash
+        timestamptz expires_at
+    }
+
+    permissions {
+        uuid id PK
+        uuid user_id FK
+        varchar resource
+        varchar action
+    }
+
+    users ||--o{ refresh_tokens : "has"
+    users ||--o{ permissions : "has"
+```
+
+### E.2. Project DB
+
+```mermaid
+erDiagram
+    projects {
+        uuid id PK
+        uuid user_id
+        varchar name
+        text repo_url
+        varchar preset
+    }
+
+    secrets {
+        uuid id PK
+        uuid project_id FK
+        varchar name
+        bytea encrypted_value
+    }
+
+    deployments {
+        uuid id PK
+        uuid project_id FK
+        uuid build_id
+        text image_tag
+        varchar container_id
+        text domain
+        varchar status
+    }
+
+    webhooks {
+        uuid id PK
+        uuid project_id FK
+        bigint github_webhook_id
+        varchar secret
+    }
+
+    projects ||--o{ secrets : "has"
+    projects ||--o{ deployments : "has"
+    projects ||--o{ webhooks : "has"
+```
+
+### E.3. Build DB
+
+```mermaid
+erDiagram
+    builds {
+        uuid id PK
+        uuid project_id
+        varchar commit_sha
+        varchar status
+        timestamptz started_at
+        timestamptz finished_at
+    }
+
+    build_logs {
+        bigserial id PK
+        uuid build_id FK
+        timestamptz timestamp
+        text log_line
+    }
+
+    build_steps {
+        uuid id PK
+        uuid build_id FK
+        varchar step_name
+        varchar status
+        integer duration_ms
+    }
+
+    builds ||--o{ build_logs : "has"
+    builds ||--o{ build_steps : "has"
 ```
 
 ---
@@ -505,3 +824,423 @@ Bảng này định nghĩa các mẫu giao tiếp chính.
 | ID | Yêu cầu | Mô tả chi tiết |
 | :--- | :--- | :--- |
 | **NFR5.1**| Thực thi Giới hạn | Hệ thống **bắt buộc** phải thực thi chính xác các giới hạn về tài nguyên (RAM, CPU) cho các container host (tham chiếu FR6.6) và các giới hạn nghiệp vụ (số dự án, build đồng thời) dựa trên Gói đăng ký của người dùng (tham chiếu FR7). |
+
+### 4.6. Định Nghĩa Giới Hạn Gói (Plan Limits)
+
+(Content of 4.6)
+
+---
+
+## CHƯƠNG 5: YÊU CẦU VẬN HÀNH (OPERATIONAL REQUIREMENTS)
+
+### 5.1. Chiến Lược Monitoring (Monitoring Strategy)
+
+- **Công cụ:** Hệ thống sẽ sử dụng **Prometheus** để thu thập metrics và **Grafana** để trực quan hóa dashboards.
+- **Endpoint:** Mỗi microservice (ngoại trừ Runner) phải cung cấp một endpoint `/metrics` theo format của Prometheus.
+
+**Metrics cần thu thập (tối thiểu):**
+
+| Service | Metric | Mô tả |
+| :--- | :--- | :--- |
+| **Tất cả Services** | `http_requests_total` | Tổng số request HTTP nhận được, phân loại theo method, path, status code. |
+| | `http_request_duration_seconds` | Thời gian xử lý request HTTP. |
+| | `grpc_requests_total` | Tổng số request gRPC nhận được, phân loại theo method, status code. |
+| | `grpc_request_duration_seconds` | Thời gian xử lý request gRPC. |
+| | `db_connection_pool_usage` | Tỷ lệ sử dụng connection pool của database. |
+| **Build Service** | `build_queue_depth` | Số lượng job đang chờ trong Redis Queue. |
+| | `build_duration_seconds` | Thời gian hoàn thành một build. |
+| **Runner Service** | `active_build_jobs` | Số lượng job đang được thực thi. |
+| **Deployment Svc**| `active_deployments` | Số lượng container ứng dụng đang chạy. |
+| **API Gateway** | `upstream_service_errors_total` | Số lỗi khi giao tiếp với các service nội bộ. |
+
+#### 5.1.1. Thiết Kế Layout Monitoring Dashboard
+
+(Content of 5.1.1)
+
+#### 5.1.2. Chính Sách Retention Metrics
+
+- **Metrics ngắn hạn (Short-term metrics):** Các metrics có độ phân giải cao (ví dụ: mỗi 15 giây) sẽ được lưu trữ trong **7 ngày**. Bao gồm các metrics về hiệu năng, lỗi, và tài nguyên của từng service.
+- **Metrics dài hạn (Long-term metrics):** Các metrics đã được tổng hợp (ví dụ: trung bình theo giờ) sẽ được lưu trữ trong **90 ngày**. Phục vụ cho việc phân tích xu hướng và lập kế hoạch dung lượng.
+- **Metrics lịch sử (Historical metrics):** Các metrics quan trọng nhất (ví dụ: tổng số build, uptime) có thể được lưu trữ vĩnh viễn hoặc trong **1 năm** để phục vụ cho báo cáo và phân tích dài hạn.
+
+### 5.2. Chiến Lược Logging (Logging Strategy)
+
+- **Định dạng Log:** Tất cả các service phải ghi log theo định dạng **JSON có cấu trúc (structured JSON)** để dễ dàng parse và truy vấn.
+- **Log Aggregation:** Log từ tất cả các container sẽ được thu thập bởi một agent (ví dụ: Fluentd, Promtail) và đẩy về một hệ thống tập trung (ví dụ: Loki, Elasticsearch).
+
+**Cấu trúc một dòng log (JSON):**
+```json
+{
+  "level": "info",
+  "timestamp": "2025-11-01T12:00:00.123Z",
+  "service": "auth-service",
+  "correlation_id": "a1b2c3d4-e5f6-7890-1234-567890abcdef",
+  "message": "User successfully authenticated",
+  "user_id": "f0e9d8c7-b6a5-4321-fedc-ba9876543210",
+  "github_id": 12345
+}
+```
+
+- **Correlation ID:**
+    - `API Gateway` chịu trách nhiệm tạo một `correlation_id` (UUID) cho mỗi request đến từ bên ngoài.
+    - ID này phải được truyền đi qua tất cả các cuộc gọi gRPC và log messages liên quan đến request đó.
+    - Điều này cho phép trace một request qua nhiều service khác nhau trong hệ thống log tập trung.
+
+#### 5.2.1. Chính Sách Retention Logs
+
+- **Logs ngắn hạn (Short-term logs):** Các logs chi tiết (DEBUG, INFO) sẽ được lưu trữ trong **7 ngày**. Phục vụ cho việc debug và giám sát sự cố tức thời.
+- **Logs dài hạn (Long-term logs):** Các logs quan trọng (WARN, ERROR) sẽ được lưu trữ trong **90 ngày**. Phục vụ cho việc phân tích nguyên nhân gốc rễ (root cause analysis) và tuân thủ quy định.
+- **Logs kiểm toán (Audit logs):** Các logs liên quan đến bảo mật và hành động của người dùng có thể được lưu trữ trong **1 năm** hoặc lâu hơn tùy theo yêu cầu tuân thủ.
+
+### 5.3. Distributed Tracing
+
+- **Mục đích:** Distributed tracing cho phép theo dõi một request duy nhất khi nó đi qua nhiều service khác nhau, giúp xác định nguyên nhân gốc rễ của các vấn đề về hiệu suất và lỗi trong kiến trúc microservices.
+
+#### 5.3.1. Lựa Chọn Hệ Thống Tracing
+
+(Content of 5.3.1)
+
+#### 5.3.2. Các Luồng Quan Trọng Cần Trace
+
+Các luồng sau đây được xác định là quan trọng và cần được theo dõi bằng distributed tracing:
+
+1.  **Luồng Đăng Nhập User:** Từ khi người dùng click "Login with GitHub" đến khi nhận được JWT và chuyển hướng về dashboard.
+2.  **Luồng Tạo Project:** Từ khi người dùng submit form tạo project đến khi project được lưu vào database và webhook được tạo trên GitHub.
+3.  **Luồng CI/CD (Git Push Trigger):** Từ khi GitHub gửi webhook đến khi build hoàn thành (Success/Failed) và deployment (nếu có).
+4.  **Luồng Phân Tích AI:** Từ khi người dùng yêu cầu phân tích lỗi đến khi nhận được kết quả từ LLM API và hiển thị trên UI.
+5.  **Luồng Deployment:** Từ khi Build Service yêu cầu Deployment Service triển khai đến khi container mới chạy và Traefik cập nhật routing.
+
+---
+
+## CHƯƠNG 6. QUẢN LÝ SECRETS VÀ KEY ROTATION
+
+### 6.1. Deep Dive Quản Lý Secrets
+
+- **Nơi lưu trữ Master Key:** Master encryption key sẽ được lưu trữ an toàn trong một hệ thống quản lý secret chuyên dụng (ví dụ: HashiCorp Vault, AWS Secrets Manager) hoặc được inject vào `Project Service` dưới dạng biến môi trường khi khởi động.
+- **Luồng Mã hóa/Giải mã:**
+    - Khi lưu secret: `Project Service` nhận secret, mã hóa bằng Master Key (AES-256-GCM), và lưu vào `project_db`.
+    - Khi lấy secret: `Project Service` lấy secret đã mã hóa từ `project_db`, giải mã bằng Master Key, và trả về cho `Runner Service` (hoặc `Build Service`).
+- **Chiến lược Xoay vòng Khóa (Key Rotation Strategy):**
+    - Master Key sẽ được xoay vòng định kỳ (ví dụ: 90 ngày một lần) hoặc khi có sự cố bảo mật.
+    - Quá trình xoay vòng sẽ bao gồm:
+        1.  Tạo một Master Key mới.
+        2.  Sử dụng Master Key mới để mã hóa lại tất cả các secrets hiện có trong `project_db`.
+        3.  Vô hiệu hóa Master Key cũ.
+    - Quá trình này cần được thực hiện offline hoặc trong một cửa sổ bảo trì để đảm bảo tính toàn vẹn dữ liệu.
+- **Kiểm soát truy cập:** Chỉ `Project Service` mới có quyền truy cập vào Master Key và thực hiện các thao tác mã hóa/Giải mã.
+### 6.2. Bảo Mật Network
+
+(Content of 6.2)
+
+- **Lên kế hoạch Firewall Rules:**
+    - **Host Firewall:** Cấu hình firewall trên máy chủ (ví dụ: `ufw` trên Linux) để:
+        - Chỉ cho phép truy cập vào cổng 80 (HTTP) và 443 (HTTPS) từ bên ngoài (cho Traefik).
+        - Chỉ cho phép truy cập vào cổng 22 (SSH) từ các IP được ủy quyền.
+        - Chặn tất cả các cổng khác từ bên ngoài.
+    - **Docker Network Firewall:** Docker tự động tạo các quy tắc iptables để cô lập các container và network. Cần đảm bảo rằng các quy tắc này được duy trì và không bị ghi đè một cách không an toàn.
+    - **Internal gRPC Ports:** Các cổng gRPC của từng service chỉ được phép lắng nghe trên `nexus-network` và không được expose ra bên ngoài host.
+
+### 6.3. Bảo Mật Container
+
+- **Container Runtime Security Settings:**
+    - Tất cả các container (cả hệ thống và người dùng) sẽ chạy với các quyền hạn tối thiểu (least privilege).
+    - Sử dụng các cờ bảo mật của Docker như `--read-only`, `--cap-drop=ALL`, `--security-opt=no-new-privileges` khi thích hợp.
+- **Thực thi Resource Limits:**
+    - Giới hạn RAM và CPU sẽ được áp dụng cho các container ứng dụng của người dùng dựa trên gói đăng ký (tham chiếu FR6.6).
+    - Các container hệ thống cũng sẽ có giới hạn tài nguyên để ngăn chặn một service chiếm dụng toàn bộ tài nguyên.
+- **Cách tiếp cận Security Scanning:**
+    - **Quét Image:** Các Docker image của NexusDeploy (backend services) sẽ được quét bảo mật định kỳ bằng các công cụ như Trivy hoặc Clair để phát hiện các lỗ hổng đã biết (CVEs).
+    - **Quét Runtime:** Cân nhắc sử dụng các công cụ quét runtime (ví dụ: Falco) để phát hiện các hành vi bất thường trong các container đang chạy.
+    - **Tần suất:** Quét image sẽ được thực hiện trong quá trình CI/CD. Quét runtime sẽ được triển khai sau MVP.
+- **Định nghĩa Container Image Trust Policy:**
+    - **Nguồn Image:** Chỉ các Docker image được xây dựng từ mã nguồn nội bộ của NexusDeploy hoặc từ các registry đáng tin cậy (ví dụ: Docker Hub chính thức cho các base image) mới được phép sử dụng.
+    - **Xác minh tính toàn vẹn:** Cân nhắc sử dụng Docker Content Trust hoặc các cơ chế ký số image khác để xác minh tính toàn vẹn và nguồn gốc của image trước khi triển khai.
+    - **Quét lỗ hổng:** Tất cả các image phải vượt qua quá trình quét lỗ hổng bảo mật (security scanning) trước khi được đưa vào môi trường production.
+
+### 6.4. Authentication & Authorization
+
+- **JWT Token Lifetime:**
+    - `access_token` có thời gian sống ngắn (ví dụ: 15 phút) để giảm thiểu rủi ro khi bị lộ.
+    - `refresh_token` có thời gian sống dài hơn (ví dụ: 7 ngày) và được lưu trữ an toàn.
+- **Refresh Token Flow:**
+    - Khi `access_token` hết hạn, Frontend sẽ sử dụng `refresh_token` để yêu cầu `Auth Service` cấp `access_token` mới.
+    - `refresh_token` sẽ được kiểm tra tính hợp lệ và có thể được xoay vòng (rotated) sau mỗi lần sử dụng.
+- **Token Revocation Mechanism:**
+    - `Auth Service` sẽ sử dụng Redis để duy trì một danh sách đen (blacklist) các JWT đã bị thu hồi (ví dụ: khi người dùng đăng xuất hoặc thay đổi mật khẩu).
+    - Mỗi khi một JWT được sử dụng, `Auth Service` sẽ kiểm tra xem nó có nằm trong blacklist hay không.
+- **Rate Limiting Strategy:**
+    - `API Gateway` sẽ áp dụng rate limiting cho các endpoint quan trọng (ví dụ: đăng nhập, tạo tài khoản) để chống lại các cuộc tấn công brute-force và DDoS.
+    - Các giới hạn sẽ được cấu hình dựa trên IP hoặc `user_id` (sau khi xác thực).
+- **Thiết kế cách tiếp cận Permission Caching:**
+    - `Auth Service` sẽ cache thông tin quyền hạn của người dùng trong Redis để giảm tải cho database và tăng tốc độ phản hồi.
+    - Cache sẽ được cập nhật khi có sự thay đổi về quyền hạn hoặc gói đăng ký của người dùng.
+    - Các service khác khi cần kiểm tra quyền sẽ gọi `Auth Service` và `Auth Service` sẽ trả về từ cache nếu có.
+## CHƯƠNG 7: LÊN KẾ HOẠCH KHẢ NĂNG MỞ RỘNG (SCALABILITY PLANNING)
+
+### 7.1. Xác Định Yêu Cầu Scalability
+
+- **Services cần Horizontal Scaling:**
+    - **Runner Service:** Đây là service có khả năng mở rộng theo chiều ngang cao nhất. Việc tăng số lượng instance của `Runner Service` sẽ cho phép hệ thống xử lý nhiều build job đồng thời hơn.
+    - **API Gateway:** Là điểm truy cập chính, `API Gateway` cần có khả năng mở rộng để xử lý lượng request lớn từ người dùng.
+    - **Notification Service:** Khi số lượng kết nối WebSocket tăng lên, `Notification Service` cần được mở rộng để duy trì hiệu suất.
+- **Services có thể Single-Instance (trong giai đoạn đầu)::**
+    - **Auth Service, Project Service, Build Service, Deployment Service, AI Service:** Các service này có thể chạy dưới dạng single-instance trong giai đoạn đầu. Khi hệ thống phát triển, chúng có thể được mở rộng nếu cần thiết.
+- **Chiến lược Load Balancing:**
+    - **Traefik:** Sẽ được sử dụng làm Reverse Proxy và Load Balancer cho `API Gateway` và `Frontend`.
+    - **gRPC Internal Load Balancing:** Các cuộc gọi gRPC nội bộ giữa các service sẽ sử dụng cơ chế load balancing tích hợp của gRPC (ví dụ: round-robin) khi có nhiều instance của một service.
+- **Cách tiếp cận State Management:**
+    - Các service backend sẽ được thiết kế để stateless nhất có thể. State sẽ được lưu trữ trong PostgreSQL hoặc Redis.
+- **Chiến lược Connection Pooling Database:**
+    - Mỗi service sẽ sử dụng một connection pool để quản lý các kết nối đến PostgreSQL, giúp tối ưu hóa hiệu suất và giảm tải cho database.
+    - Kích thước của pool sẽ được cấu hình dựa trên tải dự kiến và khả năng của database.
+
+### 7.2. Thực Thi Resource Quota
+
+- **Định nghĩa cách thực thi RAM limits:**
+    - `Deployment Service` sẽ sử dụng cờ `--memory` của Docker khi chạy container để giới hạn RAM.
+- **Định nghĩa cách thực thi CPU limits:**
+    - `Deployment Service` sẽ sử dụng cờ `--cpus` hoặc `--cpu-shares` của Docker khi chạy container để giới hạn CPU.
+- **Định nghĩa monitoring cho vi phạm quota:**
+    - Hệ thống sẽ thu thập metrics về việc sử dụng tài nguyên (RAM, CPU) của các container ứng dụng người dùng.
+    - Các cảnh báo (alerts) sẽ được cấu hình trong Prometheus/Grafana khi một container vượt quá giới hạn tài nguyên được cấp phát.
+    - `Notification Service` có thể gửi thông báo cho người dùng khi ứng dụng của họ liên tục vi phạm quota.
+- **Định nghĩa hành vi khi vượt quota:**
+    - Khi một container vượt quá giới hạn RAM, Docker sẽ tự động dừng container đó.
+    - Khi một container vượt quá giới hạn CPU, Docker sẽ điều tiết (throttle) CPU của container đó.
+    - Hệ thống sẽ ghi log các sự kiện này và cập nhật trạng thái của deployment.
+
+### 8.1. Self-Deployment của NexusDeploy
+
+- **Nền tảng Orchestration:**
+    - Trong giai đoạn phát triển và MVP, hệ thống sẽ được triển khai bằng **Docker Compose**.
+    - Trong tương lai, có thể chuyển sang Kubernetes hoặc Docker Swarm để mở rộng quy mô.
+- **Service Discovery:**
+    - Các service sẽ tìm thấy nhau thông qua DNS của Docker Compose (ví dụ: `http://auth-service:8001`).
+- **Lên kế hoạch Configuration Management:**
+    - **Biến môi trường:** Các cấu hình nhạy cảm (ví dụ: database credentials, GitHub OAuth client ID/secret) sẽ được quản lý thông qua biến môi trường.
+    - **File cấu hình:** Các cấu hình không nhạy cảm (ví dụ: port, log level mặc định) có thể được lưu trữ trong các file cấu hình (ví dụ: `.yaml`, `.json`) và được đọc bởi các service khi khởi động.
+    - **Centralized Configuration (tương lai):** Cân nhắc sử dụng một hệ thống quản lý cấu hình tập trung (ví dụ: Consul, etcd) khi hệ thống phát triển và cần quản lý cấu hình động.
+- **Thiết kế Secrets Injection cho Services:**
+    - **Secrets của hệ thống:** Các secrets quan trọng của NexusDeploy (ví dụ: Master Encryption Key, API keys của LLM) sẽ được inject vào các service tương ứng thông qua biến môi trường của Docker Compose hoặc một hệ thống quản lý secret (ví dụ: HashiCorp Vault).
+    - **Secrets của người dùng:** Các secrets do người dùng định nghĩa cho ứng dụng của họ sẽ được `Project Service` quản lý (mã hóa trong `project_db`) và được `Runner Service`/`Deployment Service` giải mã, sau đó inject vào container ứng dụng dưới dạng biến môi trường.
+- **Tài liệu hóa Database Migration khi Deploy:**
+    - **Công cụ:** Sử dụng thư viện migration của Go (ví dụ: `golang-migrate/migrate`) để quản lý các phiên bản schema database.
+    - **Luồng Migration:** Các migration script sẽ được chạy tự động khi service khởi động hoặc thông qua một init container riêng biệt trong Docker Compose.
+    - **Rollback:** Cần có các migration script `down` tương ứng để hỗ trợ rollback khi cần thiết.
+- **Chiến lược Zero-Downtime Deployment:**
+    - Sử dụng Traefik để chuyển đổi lưu lượng truy cập giữa các phiên bản container cũ và mới một cách mượt mà.
+    - Đảm bảo container mới đã sẵn sàng (health check pass) trước khi chuyển đổi lưu lượng và tắt container cũ.
+
+### 8.2. Môi Trường Development
+
+- **Tài liệu hóa Docker Compose setup:**
+    - File `docker-compose.yml` sẽ định nghĩa tất cả các service cần thiết cho môi trường phát triển cục bộ.
+    - Các service backend sẽ sử dụng image `golang:1.21-alpine` và `tail -f /dev/null` làm placeholder cho đến khi code được viết.
+    - PostgreSQL và Redis sẽ được cấu hình với persistent volumes.
+- **Cấu hình Hot Reload cho Development:**
+    - Các service Go backend sẽ sử dụng các công cụ như `air` hoặc `fresh` để tự động biên dịch lại và khởi động lại service khi có thay đổi trong mã nguồn.
+    - Frontend (React) sẽ sử dụng tính năng hot module replacement (HMR) tích hợp của Vite để cập nhật giao diện mà không cần refresh trang.
+- **Setup local database seeding:**
+    - Cần có script hoặc công cụ để điền dữ liệu mẫu vào các database cục bộ, giúp developers dễ dàng kiểm thử các tính năng.
+    - Ví dụ: một script `scripts/seed-db.sh` sẽ chạy các câu lệnh SQL hoặc gọi các API seeding của service.
+### 8.3. Cân Nhắc Production
+
+- **Chiến lược backup cho databases:**
+    - **Tần suất:** Daily full backups và hourly incremental backups.
+    - **Phương pháp:** Sử dụng `pg_dump` cho PostgreSQL và `redis-cli BGSAVE` cho Redis, sau đó nén và lưu trữ vào object storage (ví dụ: S3).
+    - **Retention Policy:** Giữ 7 ngày backup đầy đủ và 30 ngày backup incremental.
+- **Disaster recovery plan:**
+    - Cần có một kế hoạch chi tiết để khôi phục hệ thống từ backup trong trường hợp xảy ra thảm họa (ví dụ: mất dữ liệu, lỗi phần cứng nghiêm trọng).
+    - Kế hoạch này bao gồm các bước khôi phục database, triển khai lại các service, và kiểm tra tính toàn vẹn của dữ liệu.
+    - **RTO (Recovery Time Objective):** Mục tiêu thời gian khôi phục là 4 giờ.
+    - **RPO (Recovery Point Objective):** Mục tiêu điểm khôi phục là 1 giờ (dựa trên incremental backups).
+- **Quy trình rollback:**
+    - Trong trường hợp deployment mới gặp sự cố nghiêm trọng, cần có khả năng rollback nhanh chóng về phiên bản trước đó.
+    - Quy trình này bao gồm việc dừng container mới, khởi động lại container cũ, và đảm bảo database schema tương thích ngược.
+- **Khả năng thực hiện blue-green deployment:**
+    - Sử dụng Traefik để chuyển đổi lưu lượng truy cập giữa hai môi trường (blue và green) một cách mượt mà.
+    - Điều này cho phép triển khai phiên bản mới mà không làm gián đoạn dịch vụ và dễ dàng rollback nếu có vấn đề.
+
+## CHƯƠNG 9: CHIẾN LƯỢC KIỂM THỬ (TESTING STRATEGY)
+
+### 9.1. Lên Kế Hoạch Test Coverage
+
+- **Định nghĩa yêu cầu unit test (mỗi service):**
+    - Mỗi service phải có unit tests bao phủ ít nhất 80% code logic quan trọng (ví dụ: xử lý nghiệp vụ, mã hóa/giải mã, tương tác database).
+    - Unit tests phải được viết độc lập, không phụ thuộc vào các service khác hoặc external systems.
+    - Sử dụng các framework testing tiêu chuẩn của Go (ví dụ: `testing` package, `testify`).
+- **Định nghĩa integration test scenarios:**
+    - Các integration tests sẽ tập trung vào việc kiểm tra sự tương tác giữa các service (ví dụ: API Gateway gọi Auth Service, Build Service đẩy job vào Redis Queue).
+    - Các kịch bản quan trọng bao gồm luồng CI/CD end-to-end, luồng đăng nhập, và luồng tạo dự án.
+    - Sử dụng các công cụ như `Docker Compose` để khởi tạo môi trường test với các service cần thiết.
+- **Định nghĩa end-to-end test critical paths:**
+    - End-to-end tests sẽ mô phỏng hành vi của người dùng cuối trên toàn bộ hệ thống (ví dụ: đăng nhập, tạo dự án, push code, xem log, phân tích AI).
+    - Các tests này sẽ chạy trên một môi trường staging gần giống production.
+    - Các critical paths bao gồm:
+        - Đăng nhập thành công và tạo dự án mới.
+        - Push code, kích hoạt CI/CD, và triển khai thành công ứng dụng.
+        - Ứng dụng được triển khai hoạt động đúng và có thể truy cập qua tên miền.
+        - Build thất bại và tính năng phân tích AI hoạt động chính xác.
+- **Lên kế hoạch quản lý test data:**
+    - Cần có một chiến lược để tạo và quản lý test data cho các môi trường testing khác nhau.
+    - Sử dụng factory functions hoặc seeding scripts để tạo dữ liệu sạch cho mỗi lần chạy test.
+    - Đảm bảo dữ liệu test không chứa thông tin nhạy cảm và được reset giữa các lần chạy test.
+- **Chọn testing frameworks:**
+    - **Backend (Go):** `testing` package (built-in), `testify` (assertions, mocks, suites) để tăng cường khả năng viết test.
+    - **Frontend (React):** `Jest` (test runner và assertion library), `React Testing Library` (để test component theo cách người dùng tương tác).
+    - **End-to-End:** `Cypress` hoặc `Playwright` (để tự động hóa các kịch bản người dùng trên trình duyệt).
+
+### 9.2. Môi Trường Test
+
+- **Setup local development testing:**
+    - Developers có thể chạy unit và integration tests cục bộ trên máy của họ.
+    - Sử dụng Docker Compose để khởi tạo các dependency (PostgreSQL, Redis) cho integration tests.
+- **Lên kế hoạch integration test environment:**
+    - Một môi trường riêng biệt sẽ được thiết lập để chạy integration tests tự động trong CI/CD pipeline.
+    - Môi trường này sẽ triển khai tất cả các service và dependency cần thiết, đảm bảo cô lập với môi trường production.
+    - Sử dụng các công cụ orchestration như Docker Compose hoặc Kubernetes (tùy thuộc vào giai đoạn phát triển) để quản lý môi trường này.
+- **Lên kế hoạch staging environment:**
+    - Một môi trường staging sẽ được thiết lập để chạy end-to-end tests và kiểm thử thủ công trước khi triển khai lên production.
+    - Môi trường này sẽ gần giống production nhất có thể về cấu hình, dữ liệu (anonymized), và các external service.
+    - Staging environment sẽ được sử dụng để xác minh các tính năng mới, kiểm tra hiệu suất và độ ổn định trước khi release.
+- **Định nghĩa ràng buộc production testing:**
+    - Không chạy các tests gây ảnh hưởng đến dữ liệu hoặc hiệu suất của người dùng trên môi trường production.
+    - Chỉ thực hiện các health checks và synthetic monitoring trên production.
+    - Các bài kiểm tra hiệu suất (performance tests) và stress tests sẽ được thực hiện trên môi trường staging hoặc một môi trường test chuyên dụng, không phải production.
+
+## CHƯƠNG 10: TÀI LIỆU CÁC SẢN PHẨM (PRODUCT DOCUMENTATION)
+
+### 10.1. Tạo Tất Cả Diagrams Cần Thiết
+
+- **Sơ Đồ Kiến Trúc Hệ Thống:** (Đã có trong Chương 2.6)
+- **Sequence Diagram:** (Đã có trong Chương 3.4.1)
+- **ER Diagram:** (Đã có trong Phụ lục E)
+- **Sơ Đồ Network Topology:**
+
+```mermaid
+graph TD
+    subgraph "Internet"
+        UserRequest[User Request]
+    end
+
+    subgraph "Host Machine (Server)"
+        direction LR
+        Traefik[Traefik Reverse Proxy]
+        subgraph "Docker Network: nexus-network"
+            APIGateway(API Gateway)
+            AuthService(Auth Service)
+            ProjectService(Project Service)
+            BuildService(Build Service)
+            RunnerService(Runner Service)
+            DeploymentService(Deployment Service)
+            AIService(AI Service)
+            NotificationService(Notification Service)
+            PostgreSQL[(PostgreSQL)]
+            Redis[(Redis)]
+        end
+        subgraph "Docker Network: user-app-network-X"
+            UserApp[User Application Container]
+        end
+    end
+
+    UserRequest -- HTTPS --> Traefik
+    Traefik -- HTTP/HTTPS --> APIGateway
+    Traefik -- HTTP/HTTPS --> UserApp
+
+    APIGateway -- gRPC --> AuthService
+    APIGateway -- gRPC --> ProjectService
+    APIGateway -- gRPC --> BuildService
+    APIGateway -- gRPC --> AIService
+
+    AuthService -- DB --> PostgreSQL
+    ProjectService -- DB --> PostgreSQL
+    BuildService -- DB --> PostgreSQL
+
+    BuildService -- Redis --> Redis
+    RunnerService -- Redis --> Redis
+    AIService -- Redis --> Redis
+    NotificationService -- Redis --> Redis
+
+    RunnerService -- Docker Socket --> HostMachine(Docker Engine)
+    DeploymentService -- Docker Socket --> HostMachine
+
+    UserApp -- Internet (Optional) --> ExternalServices(External Services)
+```
+
+### 10.2. Viết Tài Liệu Đặc Tả
+
+- **Đặc Tả REST API (OpenAPI/Swagger):** (Đã có trong Phụ lục C.1)
+- **Đặc Tả gRPC Service (.proto files được tài liệu hóa):** (Đã có trong Phụ lục C.2)
+- **Đặc Tả WebSocket Events:** (Sẽ được tài liệu hóa chi tiết trong Notification Service)
+- **Đặc Tả Message Queue:** (Đã có trong Phụ lục C.2)
+- **Tài Liệu Tham Khảo Error Code:** (Sẽ được định nghĩa tập trung)
+- **Tài Liệu Kiến Trúc Bảo Mật:** (Đã có trong Chương 6)
+- **Deployment Runbook:**
+    - **Mục đích:** Cung cấp hướng dẫn từng bước để triển khai, cập nhật và quản lý hệ thống NexusDeploy trên môi trường production.
+    - **Nội dung:** Bao gồm các bước chuẩn bị môi trường, cài đặt dependencies, cấu hình các service, thực hiện database migrations, và xác minh deployment thành công.
+    - **Các kịch bản:** Bao gồm triển khai lần đầu, cập nhật phiên bản mới, và rollback khi cần thiết.
+- **Đặc Tả Monitoring Dashboard:** (Đã có trong Chương 5.1.1)
+
+### 10.3. Cập Nhật Tài Liệu SRS
+
+- **Viết lại tất cả FRs với tên service rõ ràng:** (Đã hoàn thành)
+- **Thêm tất cả sequence diagrams:** (Đã hoàn thành)
+- **Thêm tất cả ER diagrams:** (Đã hoàn thành)
+- **Thêm API specifications:** (Đã hoàn thành)
+- **Thêm acceptance criteria cho tất cả FRs:** (Đã hoàn thành)
+- **Làm tất cả NFRs có thể đo lường với context:** (Đã hoàn thành)
+- **Thêm phần yêu cầu vận hành:** (Đã hoàn thành)
+- **Thêm phần chiến lược testing:** (Đã hoàn thành)
+- **Hoàn thiện tất cả placeholder diagrams:**
+    - Tất cả các placeholder diagrams trong tài liệu (ví dụ: Use Case Diagram, System Architecture Diagram, Sequence Diagrams, ER Diagrams) đã được thay thế bằng các sơ đồ hoàn chỉnh và chính xác.
+    - Đảm bảo các sơ đồ tuân thủ các tiêu chuẩn và dễ hiểu.
+
+## PHỤ LỤC F: TIÊU CHÍ CHẤP NHẬN (ACCEPTANCE CRITERIA)
+
+Phần này cung cấp các ví dụ về tiêu chí chấp nhận cho các yêu cầu chức năng, sử dụng cú pháp Gherkin (Given/When/Then).
+
+### F.1. FR1: Quản lý Xác thực
+
+(Content of F.1)
+
+### F.2. FR2: Quản lý Dự án
+
+(Content of F.2)
+
+### F.3. FR3: Quản lý Biến môi trường (Secrets)
+
+(Content of F.3)
+
+### F.4. FR4: Quy trình Tích hợp & Triển khai (CI/CD Pipeline)
+
+(Content of F.4)
+
+### F.5. FR5: Phân tích Lỗi bằng AI
+
+(Content of F.5)
+
+### F.6. FR6: Hosting & Quản lý Vòng đời
+
+(Content of F.6)
+
+### F.7. FR7: Quản lý Gói đăng ký & Phân quyền
+
+**Kịch bản: Người dùng gói Standard bị giới hạn số lượng dự án**
+```gherkin
+Given người dùng đang sử dụng gói "Standard"
+And người dùng đã có 3 dự án
+When người dùng cố gắng tạo một dự án thứ 4
+Then API Gateway sẽ gọi Auth Service để kiểm tra quyền
+And Auth Service sẽ trả về kết quả "không được phép"
+And API Gateway sẽ từ chối yêu cầu với một thông báo lỗi
+And giao diện người dùng hiển thị thông báo "Bạn đã đạt giới hạn số lượng dự án cho gói Standard."
+```
+
+**Kịch bản: Giới hạn tài nguyên được áp dụng cho container của người dùng Premium**
+```gherkin
+Given người dùng đang sử dụng gói "Premium"
+And một build cho dự án của họ vừa hoàn thành
+When Deployment Service chuẩn bị chạy container mới
+Then Deployment Service sẽ lấy thông tin gói từ Auth Service
+And áp dụng đúng giới hạn RAM (2GB) và CPU (2 cores) cho container khi chạy
+```

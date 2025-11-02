@@ -1,0 +1,133 @@
+version: '3.8'
+
+services:
+  # ------------------ Infrastructure ------------------
+  postgres:
+    image: postgres:15-alpine
+    container_name: nexus_postgres
+    environment:
+      POSTGRES_USER: nexus
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: nexus_main # Will create separate DBs using a script
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+      - ./scripts/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh
+    networks:
+      - nexus-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nexus"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: nexus_redis
+    ports:
+      - "6379:6379"
+    networks:
+      - nexus-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  traefik:
+    image: traefik:v2.9
+    container_name: nexus_traefik
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+    ports:
+      - "80:80"
+      - "8080:8080" # Traefik Dashboard
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - nexus-network
+
+  # ------------------ Backend Services ------------------
+  api-gateway:
+    image: golang:1.21-alpine
+    container_name: nexus_api_gateway
+    command: tail -f /dev/null # Placeholder
+    networks:
+      - nexus-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.api-gateway.rule=Host(`localhost`) && PathPrefix(`/api`)"
+      - "traefik.http.services.api-gateway.loadbalancer.server.port=8000"
+
+  auth-service:
+    image: golang:1.21-alpine
+    container_name: nexus_auth_service
+    command: tail -f /dev/null # Placeholder
+    networks:
+      - nexus-network
+
+  project-service:
+    image: golang:1.21-alpine
+    container_name: nexus_project_service
+    command: tail -f /dev/null # Placeholder
+    networks:
+      - nexus-network
+
+  build-service:
+    image: golang:1.21-alpine
+    container_name: nexus_build_service
+    command: tail -f /dev/null # Placeholder
+    networks:
+      - nexus-network
+
+  runner-service:
+    image: golang:1.21-alpine
+    container_name: nexus_runner_service
+    command: tail -f /dev/null # Placeholder
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - nexus-network
+
+  deployment-service:
+    image: golang:1.21-alpine
+    container_name: nexus_deployment_service
+    command: tail -f /dev/null # Placeholder
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - nexus-network
+
+  ai-service:
+    image: golang:1.21-alpine
+    container_name: nexus_ai_service
+    command: tail -f /dev/null # Placeholder
+    networks:
+      - nexus-network
+
+  notification-service:
+    image: golang:1.21-alpine
+    container_name: nexus_notification_service
+    command: tail -f /dev/null # Placeholder
+    networks:
+      - nexus-network
+
+  # ------------------ Frontend Service ------------------
+  frontend:
+    image: node:18-alpine
+    container_name: nexus_frontend
+    command: tail -f /dev/null # Placeholder
+    networks:
+      - nexus-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=Host(`localhost`)"
+      - "traefik.http.services.frontend.loadbalancer.server.port=3000"
+
+networks:
+  nexus-network:
+    driver: bridge
