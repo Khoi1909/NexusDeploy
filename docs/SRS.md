@@ -119,7 +119,17 @@ Hệ thống có hai tác nhân chính:
 
 ### 2.3. Sơ đồ Use Case tổng quan
 Sơ đồ này mô tả các tương tác cấp cao của tác nhân "Developer" với hệ thống Nexus Deploy.
-*(Nội dung hình ảnh về Use Case sẽ được cập nhật sau)*
+
+- **Developer** đăng nhập vào hệ thống bằng tài khoản GitHub.
+- **Developer** tạo một dự án mới bằng cách chọn một kho mã nguồn từ GitHub.
+- Hệ thống tự động cài đặt webhook vào kho mã nguồn đó.
+- **Developer** đẩy code lên kho mã nguồn.
+- **GitHub** gửi một sự kiện webhook đến hệ thống NexusDeploy.
+- Hệ thống bắt đầu một quy trình CI/CD:
+    - Build và test ứng dụng.
+    - Nếu thất bại, **Developer** có thể yêu cầu AI phân tích lỗi.
+    - Nếu thành công, hệ thống build một Docker image, đẩy lên registry, và triển khai ứng dụng.
+- **Developer** có thể xem log, quản lý biến môi trường, và xem trạng thái của ứng dụng.
 
 ### 2.4. Các giả định (Assumptions)
 1.  **Hạ tầng:** Hệ thống được giả định chạy trên một máy chủ (Server) đã được cài đặt sẵn Docker, Docker SDK (cho Go), và Traefik.
@@ -131,7 +141,7 @@ Sơ đồ này mô tả các tương tác cấp cao của tác nhân "Developer"
 ### 2.5. Các ràng buộc (Constraints)
 1.  **Công nghệ (Tech Stack):**
     - **Backend (Go Microservices):**
-        - Ngôn ngữ: Go 1.21+
+        - Ngôn ngữ: Go 1.23
         - Kiến trúc: Microservices (8 services)
         - Giao tiếp: gRPC (nội bộ), REST API (bên ngoài), WebSocket (real-time)
         - ORM: GORM
@@ -156,7 +166,7 @@ Sơ đồ này mô tả các tương tác cấp cao của tác nhân "Developer"
 5.  **API Bên ngoài (External APIs):**
     - Hệ thống phụ thuộc vào tính khả dụng của GitHub API (cho OAuth, Webhook) và LLM API (cho phân tích lỗi). Nếu các API này gặp sự cố, các tính năng liên quan sẽ bị gián đoạn.
 6.  **Service Discovery & Observability:**
-    - **Service Discovery:** Các service nội bộ sẽ tìm thấy nhau thông qua Docker Compose DNS resolution (ví dụ: `http://auth-service:8001`).
+    - **Service Discovery:** Các service nội bộ sẽ tìm thấy nhau thông qua Docker Compose DNS resolution (ví dụ: `http://auth-service:8080`).
     - **Health Checks:** Mỗi service phải cung cấp ít nhất 2 endpoint: `/health` (liveness probe) và `/ready` (readiness probe).
     - **Metrics:** Mỗi service nên cung cấp endpoint `/metrics` theo format của Prometheus để phục vụ cho việc giám sát.
 
@@ -640,13 +650,177 @@ Khi `Build Service` muốn một `Runner Service` thực thi một job, nó sẽ
 }
 ```
 
-## PHỤ LỤC C: ĐẶC TẢ API VÀ EVENTS
-
-(Content of Appendix C)
-
 ## PHỤ LỤC D: SEQUENCE DIAGRAMS
 
-(Content of Appendix D)
+Phần này chứa các sequence diagram chi tiết cho các luồng nghiệp vụ quan trọng, được vẽ bằng Mermaid.js.
+
+### D.1. Luồng Đăng nhập (Login Flow)
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Frontend
+    participant APIGateway as API Gateway
+    participant AuthService as Auth Service
+    participant GitHub
+
+    User->>Frontend: Click "Login with GitHub"
+    Frontend->>APIGateway: GET /auth/github/login
+    APIGateway->>AuthService: gRPC: StartOAuthFlow
+    AuthService-->>APIGateway: Redirect URL to GitHub
+    APIGateway-->>Frontend: Redirect URL
+    Frontend-->>User: Redirect to GitHub OAuth page
+    
+    User->>GitHub: Authorize application
+    GitHub-->>User: Redirect to callback URL with auth code
+    
+    User->>Frontend: Access callback URL
+    Frontend->>APIGateway: GET /auth/github/callback?code=...
+    APIGateway->>AuthService: gRPC: HandleOAuthCallback(code)
+    
+    AuthService->>GitHub: Exchange code for access_token
+    GitHub-->>AuthService: access_token
+    
+    AuthService->>GitHub: Get user info with access_token
+    GitHub-->>AuthService: User Info
+    
+    AuthService->>PostgreSQL: Create/Update user in auth_db
+    PostgreSQL-->>AuthService: User record
+    
+    AuthService->>AuthService: Generate JWT
+    AuthService-->>APIGateway: JWT
+    APIGateway-->>Frontend: JWT
+    Frontend-->>User: Store JWT, redirect to Dashboard
+```
+
+### D.2. Luồng Tạo Dự án (Create Project Flow)
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Frontend
+    participant APIGateway as API Gateway
+    participant ProjectService as Project Service
+    participant GitHub
+
+    User->>Frontend: Fill and submit "Create Project" form
+    Frontend->>APIGateway: POST /projects (repo info)
+    
+    APIGateway->>ProjectService: gRPC: CreateProject(repo_info)
+    ProjectService->>PostgreSQL: Save new project to project_db
+    PostgreSQL-->>ProjectService: Project created
+    
+    ProjectService->>GitHub: API Call: Create Webhook for repo
+    GitHub-->>ProjectService: Webhook created successfully
+    
+    ProjectService->>PostgreSQL: Save webhook info
+    PostgreSQL-->>ProjectService: Webhook info saved
+    
+    ProjectService-->>APIGateway: Success response
+    APIGateway-->>Frontend: Success response
+    Frontend-->>User: Redirect to new project's page
+```
+
+### D.3. Luồng CI/CD (CI/CD Trigger Flow)
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant GitHub
+    participant APIGateway as API Gateway
+    participant BuildService as Build Service
+    participant Redis
+    participant RunnerService as Runner Service
+    participant DeploymentService as Deployment Service
+    participant NotificationService as Notification Service
+    participant Frontend
+
+    User->>GitHub: git push
+    GitHub->>APIGateway: Webhook event
+    APIGateway->>BuildService: gRPC: TriggerBuild
+    BuildService->>PostgreSQL: Create build record (status: pending)
+    BuildService->>Redis: Push build job to queue
+
+    RunnerService->>Redis: Pop build job from queue
+    RunnerService->>BuildService: gRPC: UpdateBuildStatus (status: Running)
+    
+    loop CI Phase (Build/Test)
+        RunnerService->>Redis: Publish build logs to Pub/Sub
+        NotificationService->>Redis: Subscribe to logs channel
+        NotificationService->>Frontend: Stream logs via WebSocket
+    end
+
+    alt CI Success
+        RunnerService->>BuildService: gRPC: UpdateBuildStatus (status: BuildingImage)
+        RunnerService->>RunnerService: Build and push Docker image to registry
+        RunnerService->>BuildService: gRPC: UpdateBuildStatus (status: Deploying)
+        BuildService->>DeploymentService: gRPC: Deploy(spec)
+        DeploymentService->>DeploymentService: Pull image, run container with Traefik labels
+        DeploymentService->>BuildService: gRPC: Report deployment status
+        BuildService->>PostgreSQL: Update build status (status: Success)
+        BuildService->>NotificationService: Notify success event
+        NotificationService->>Frontend: Show "Success" status
+    else CI Failure
+        RunnerService->>BuildService: gRPC: UpdateBuildStatus (status: Failed)
+        BuildService->>PostgreSQL: Save final logs and status
+        BuildService->>NotificationService: Notify failure event
+        NotificationService->>Frontend: Show "Failed" status
+    end
+```
+
+### D.4. Luồng Phân tích AI (AI Analysis Flow)
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Frontend
+    participant APIGateway as API Gateway
+    participant AIService as AI Service
+    participant BuildService as Build Service
+    participant Redis
+    participant LLM
+
+    User->>Frontend: Click "Tell me why" on failed build
+    Frontend->>APIGateway: POST /builds/{id}/analyze
+    APIGateway->>AIService: gRPC: AnalyzeBuild(build_id)
+    
+    AIService->>Redis: Check for cached analysis
+    alt Analysis not in cache
+        Redis-->>AIService: Not found
+        AIService->>BuildService: gRPC: GetBuildLogs(build_id)
+        BuildService-->>AIService: Build logs
+        AIService->>LLM: API Call with logs in prompt
+        LLM-->>AIService: Analysis result
+        AIService->>Redis: Cache the result
+    else Analysis in cache
+        Redis-->>AIService: Cached analysis
+    end
+
+    AIService-->>APIGateway: Analysis result
+    APIGateway-->>Frontend: Analysis result
+    Frontend-->>User: Display analysis in UI
+```
+
+### D.5. Luồng Lấy Log (Runtime Log Streaming Flow)
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Frontend
+    participant NotificationService as Notification Service
+    participant DeploymentService as Deployment Service
+    participant Redis
+
+    User->>Frontend: Open "Logs" tab for a running project
+    Frontend->>NotificationService: Establish WebSocket and subscribe to project logs
+    
+    loop Real-time Logging
+        DeploymentService->>Redis: Publish container logs to Pub/Sub channel
+        Redis-->>NotificationService: Forward logs from channel
+        NotificationService-->>Frontend: Push logs via WebSocket
+        Frontend-->>User: Display logs in real-time
+    end
+```
 
 ## PHỤ LỤC E: SƠ ĐỒ QUAN HỆ THỰC THỂ (ER DIAGRAMS)
 
@@ -827,7 +1001,17 @@ Bảng này định nghĩa các mẫu giao tiếp chính.
 
 ### 4.6. Định Nghĩa Giới Hạn Gói (Plan Limits)
 
-(Content of 4.6)
+Bảng dưới đây định nghĩa các giới hạn tài nguyên và chức năng cho từng gói đăng ký.
+
+| Tính năng | Gói Standard (Mặc định) | Gói Premium |
+| :--- | :--- | :--- |
+| **Số dự án tối đa** | 3 | 20 |
+| **Build đồng thời** | 1 | 5 |
+| **RAM tối đa / ứng dụng** | 512 MB | 2 GB |
+| **CPU tối đa / ứng dụng** | 1 Core | 2 Cores |
+| **Phân tích lỗi AI** | Gợi ý chung | Gợi ý chi tiết & Sửa lỗi |
+| **Tên miền tùy chỉnh** | Không | Có |
+| **Hỗ trợ** | Cộng đồng | Email & Chat |
 
 ---
 
@@ -855,7 +1039,32 @@ Bảng này định nghĩa các mẫu giao tiếp chính.
 
 #### 5.1.1. Thiết Kế Layout Monitoring Dashboard
 
-(Content of 5.1.1)
+Dashboard giám sát trên Grafana sẽ được chia thành các panel chính sau để cung cấp cái nhìn tổng quan về sức khỏe hệ thống:
+
+- **Panel 1: System Overview**
+  - **Metrics:** `active_deployments`, `build_queue_depth`, `total_users`.
+  - **Visualization:** Stat Panels.
+  - **Mô tả:** Cung cấp các chỉ số quan trọng nhất về trạng thái hiện tại của hệ thống.
+
+- **Panel 2: HTTP/gRPC Request Rate & Latency**
+  - **Metrics:** `http_requests_total`, `grpc_requests_total`, `http_request_duration_seconds`, `grpc_request_duration_seconds`.
+  - **Visualization:** Time series graphs.
+  - **Mô tả:** Hiển thị lưu lượng và độ trễ của các request, giúp phát hiện các vấn đề về hiệu năng.
+
+- **Panel 3: Service Health**
+  - **Metrics:** `up` (từ Prometheus).
+  - **Visualization:** Table or Stat Panels with color coding.
+  - **Mô tả:** Hiển thị trạng thái (up/down) của từng microservice.
+
+- **Panel 4: Resource Usage per Service**
+  - **Metrics:** `container_cpu_usage_seconds_total`, `container_memory_usage_bytes`.
+  - **Visualization:** Time series graphs, grouped by service.
+  - **Mô tả:** Theo dõi việc sử dụng CPU và RAM của từng service để phát hiện rò rỉ tài nguyên hoặc nhu cầu mở rộng.
+
+- **Panel 5: Build Statistics**
+  - **Metrics:** `build_duration_seconds`, `builds_total` (phân loại theo status: success, failed).
+  - **Visualization:** Bar chart and Time series graph.
+  - **Mô tả:** Cung cấp thông tin về hiệu suất và tỷ lệ thành công của các quy trình CI/CD.
 
 #### 5.1.2. Chính Sách Retention Metrics
 
@@ -898,7 +1107,12 @@ Bảng này định nghĩa các mẫu giao tiếp chính.
 
 #### 5.3.1. Lựa Chọn Hệ Thống Tracing
 
-(Content of 5.3.1)
+- **Công cụ:** Hệ thống sẽ sử dụng **OpenTelemetry** làm tiêu chuẩn để thu thập và truyền tải trace data. OpenTelemetry là một framework mã nguồn mở, được hỗ trợ rộng rãi và không phụ thuộc vào nhà cung cấp (vendor-neutral).
+- **Backend:** **Jaeger** sẽ được sử dụng làm backend để lưu trữ và trực quan hóa các traces.
+- **Instrumentation:**
+  - Mỗi microservice sẽ được tích hợp OpenTelemetry SDK for Go.
+  - Các thư viện gRPC, HTTP client/server, và database client sẽ được "instrumented" để tự động tạo và truyền tải các "spans" (đơn vị của một trace).
+  - `correlation_id` sẽ được tự động thêm vào mỗi span dưới dạng một attribute để liên kết với hệ thống logging.
 
 #### 5.3.2. Các Luồng Quan Trọng Cần Trace
 
@@ -930,7 +1144,11 @@ Các luồng sau đây được xác định là quan trọng và cần được
 - **Kiểm soát truy cập:** Chỉ `Project Service` mới có quyền truy cập vào Master Key và thực hiện các thao tác mã hóa/Giải mã.
 ### 6.2. Bảo Mật Network
 
-(Content of 6.2)
+- **Network Isolation:**
+  - Hệ thống sử dụng nhiều mạng Docker riêng biệt để cô lập các thành phần:
+    - `nexus-network`: Mạng nội bộ cho các microservice của NexusDeploy. Chỉ các service trong mạng này mới có thể giao tiếp với nhau qua gRPC.
+    - `user-app-network-<project_id>`: Mỗi ứng dụng của người dùng được chạy trong một mạng riêng để ngăn chặn giao tiếp trái phép giữa các ứng dụng của các người dùng khác nhau.
+  - Traefik đóng vai trò là gateway, chỉ cho phép truy cập từ bên ngoài vào các service được cấu hình rõ ràng.
 
 - **Lên kế hoạch Firewall Rules:**
     - **Host Firewall:** Cấu hình firewall trên máy chủ (ví dụ: `ufw` trên Linux) để:
@@ -1009,13 +1227,15 @@ Các luồng sau đây được xác định là quan trọng và cần được
     - Khi một container vượt quá giới hạn CPU, Docker sẽ điều tiết (throttle) CPU của container đó.
     - Hệ thống sẽ ghi log các sự kiện này và cập nhật trạng thái của deployment.
 
+## CHƯƠNG 8: CHIẾN LƯỢC TRIỂN KHAI (DEPLOYMENT STRATEGY)
+
 ### 8.1. Self-Deployment của NexusDeploy
 
 - **Nền tảng Orchestration:**
     - Trong giai đoạn phát triển và MVP, hệ thống sẽ được triển khai bằng **Docker Compose**.
     - Trong tương lai, có thể chuyển sang Kubernetes hoặc Docker Swarm để mở rộng quy mô.
 - **Service Discovery:**
-    - Các service sẽ tìm thấy nhau thông qua DNS của Docker Compose (ví dụ: `http://auth-service:8001`).
+    - Các service sẽ tìm thấy nhau thông qua DNS của Docker Compose (ví dụ: `http://auth-service:8080`).
 - **Lên kế hoạch Configuration Management:**
     - **Biến môi trường:** Các cấu hình nhạy cảm (ví dụ: database credentials, GitHub OAuth client ID/secret) sẽ được quản lý thông qua biến môi trường.
     - **File cấu hình:** Các cấu hình không nhạy cảm (ví dụ: port, log level mặc định) có thể được lưu trữ trong các file cấu hình (ví dụ: `.yaml`, `.json`) và được đọc bởi các service khi khởi động.
@@ -1201,27 +1421,70 @@ Phần này cung cấp các ví dụ về tiêu chí chấp nhận cho các yêu
 
 ### F.1. FR1: Quản lý Xác thực
 
-(Content of F.1)
+**Kịch bản: Đăng nhập thành công bằng GitHub**
+```gherkin
+Given người dùng chưa đăng nhập vào hệ thống
+When người dùng nhấn nút "Login with GitHub" và hoàn tất quá trình xác thực trên GitHub
+Then hệ thống sẽ tạo một tài khoản mới (nếu chưa có)
+And hệ thống sẽ tạo một JWT và trả về cho người dùng
+And người dùng được chuyển hướng đến trang Dashboard
+```
 
 ### F.2. FR2: Quản lý Dự án
 
-(Content of F.2)
+**Kịch bản: Người dùng tạo một dự án mới thành công**
+```gherkin
+Given người dùng đã đăng nhập
+And người dùng đang ở trang "New Project"
+When người dùng chọn một kho mã nguồn từ danh sách và nhấn "Create Project"
+Then hệ thống sẽ lưu thông tin dự án vào database
+And hệ thống sẽ tự động cài đặt một webhook vào kho mã nguồn đó trên GitHub
+And người dùng được chuyển hướng đến trang cài đặt của dự án mới
+```
 
 ### F.3. FR3: Quản lý Biến môi trường (Secrets)
 
-(Content of F.3)
+**Kịch bản: Người dùng thêm một biến môi trường mới**
+```gherkin
+Given người dùng đang ở trang cài đặt của một dự án
+When người dùng nhập tên và giá trị cho một biến môi trường mới và nhấn "Add"
+Then hệ thống sẽ mã hóa giá trị của biến môi trường
+And lưu tên và giá trị đã mã hóa vào database
+And giao diện sẽ hiển thị tên biến môi trường vừa thêm với giá trị bị che đi
+```
 
 ### F.4. FR4: Quy trình Tích hợp & Triển khai (CI/CD Pipeline)
 
-(Content of F.4)
+**Kịch bản: CI/CD được kích hoạt thành công sau khi push code**
+```gherkin
+Given một dự án đã được cấu hình và liên kết với một kho mã nguồn GitHub
+When người dùng thực hiện một `git push` lên nhánh chính của kho mã nguồn
+Then GitHub sẽ gửi một sự kiện webhook đến hệ thống
+And hệ thống sẽ xác thực webhook và bắt đầu một quy trình build mới
+And trạng thái của build trên giao diện người dùng chuyển thành "Pending"
+```
 
 ### F.5. FR5: Phân tích Lỗi bằng AI
 
-(Content of F.5)
+**Kịch bản: Người dùng yêu cầu phân tích lỗi cho một build thất bại**
+```gherkin
+Given một quy trình build đã thất bại và có log lỗi
+When người dùng nhấn nút "Tell me why" trên trang chi tiết của build
+Then hệ thống sẽ gửi log lỗi đến mô hình AI
+And hiển thị một cửa sổ với gợi ý khắc phục từ AI
+```
 
 ### F.6. FR6: Hosting & Quản lý Vòng đời
 
-(Content of F.6)
+**Kịch bản: Ứng dụng được triển khai thành công và có thể truy cập**
+```gherkin
+Given một quy trình CI/CD đã hoàn tất thành công
+And một Docker image đã được build và đẩy lên registry
+When hệ thống bắt đầu giai đoạn triển khai
+Then một container mới sẽ được khởi chạy với image tương ứng
+And Traefik sẽ được cấu hình để định tuyến một tên miền con đến container đó
+And người dùng có thể truy cập ứng dụng qua tên miền được cung cấp với HTTPS
+```
 
 ### F.7. FR7: Quản lý Gói đăng ký & Phân quyền
 
