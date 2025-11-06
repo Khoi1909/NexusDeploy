@@ -87,8 +87,8 @@ Tài liệu này dành cho các đối tượng sau:
 - **GORM:** ORM (Object-Relational Mapping) cho Go, giúp tương tác với cơ sở dữ liệu.
 - **Asynq:** Thư viện quản lý hàng đợi (job queue) cho Go, xây dựng trên Redis.
 - **go-git:** Thư viện Go để đọc và thao tác với kho git.
-- **Vite:** Công cụ build frontend hiện đại, tối ưu cho tốc độ phát triển.
 - **TailwindCSS:** Framework CSS ưu tiên tiện ích (utility-first) để xây dựng giao diện nhanh chóng.
+- **Next.js:** Framework React với SSR (Server-Side Rendering), SSG (Static Site Generation), App Router, và React 19 support.
 
 ### 1.5. Tổng quan tài liệu
 Tài liệu này được tổ chức thành các chương:
@@ -138,9 +138,9 @@ Sơ đồ này mô tả các tương tác cấp cao của tác nhân "Developer"
         - Hàng đợi (Queue): Redis + Asynq
         - Tương tác Git: go-git
     - **Frontend:**
-        - Framework: React 18 (sử dụng Vite)
+        - Framework: Next.js 15 (App Router, React 19)
         - Styling: TailwindCSS
-        - Quản lý State: Zustand/Redux
+        - Quản lý State: Zustand (client-side) + Server Components
     - **Cơ sở hạ tầng:**
         - CSDL: PostgreSQL 15+
         - Cache/Queue: Redis 7+
@@ -191,7 +191,7 @@ graph TD
             NotificationService(Notification Service)
         end
 
-        Frontend(React Frontend)
+        Frontend(Next.js Frontend)
     end
 
     User -->|HTTPS| Frontend
@@ -1039,7 +1039,7 @@ Các luồng sau đây được xác định là quan trọng và cần được
     - PostgreSQL và Redis sẽ được cấu hình với persistent volumes.
 - **Cấu hình Hot Reload cho Development:**
     - Các service Go backend sẽ sử dụng các công cụ như `air` hoặc `fresh` để tự động biên dịch lại và khởi động lại service khi có thay đổi trong mã nguồn.
-    - Frontend (React) sẽ sử dụng tính năng hot module replacement (HMR) tích hợp của Vite để cập nhật giao diện mà không cần refresh trang.
+    - Frontend (Next.js) sẽ sử dụng tính năng Fast Refresh tích hợp để cập nhật giao diện mà không cần refresh trang.
 - **Setup local database seeding:**
     - Cần có script hoặc công cụ để điền dữ liệu mẫu vào các database cục bộ, giúp developers dễ dàng kiểm thử các tính năng.
     - Ví dụ: một script `scripts/seed-db.sh` sẽ chạy các câu lệnh SQL hoặc gọi các API seeding của service.
@@ -1087,8 +1087,8 @@ Các luồng sau đây được xác định là quan trọng và cần được
     - Đảm bảo dữ liệu test không chứa thông tin nhạy cảm và được reset giữa các lần chạy test.
 - **Chọn testing frameworks:**
     - **Backend (Go):** `testing` package (built-in), `testify` (assertions, mocks, suites) để tăng cường khả năng viết test.
-    - **Frontend (React):** `Jest` (test runner và assertion library), `React Testing Library` (để test component theo cách người dùng tương tác).
-    - **End-to-End:** `Cypress` hoặc `Playwright` (để tự động hóa các kịch bản người dùng trên trình duyệt).
+    - **Frontend (Next.js):** `Jest` + `@testing-library/react` (component tests), Vitest (alternative, faster), Next.js built-in testing với Playwright.
+    - **End-to-End:** `Playwright` (recommended cho Next.js) hoặc `Cypress` (để tự động hóa các kịch bản người dùng trên trình duyệt).
 
 ### 9.2. Môi Trường Test
 
