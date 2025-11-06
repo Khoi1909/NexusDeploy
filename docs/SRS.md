@@ -37,12 +37,26 @@
   - [3.5. FR5: Phân tích Lỗi bằng AI](#35-fr5-phân-tích-lỗi-bằng-ai)
   - [3.6. FR6: Hosting & Quản lý Vòng đời](#36-fr6-hosting--quản-lý-vòng-đời)
   - [3.7. FR7: Quản lý Gói đăng ký & Phân quyền (Plan & Permission)](#37-fr7-quản-lý-gói-đăng-ký--phân-quyền-plan--permission)
+  - [3.8. Error Handling & Fault Tolerance](#38-error-handling--fault-tolerance)
+  - [3.9. Sample API Contracts](#39-sample-api-contracts)
+  - [3.10. Mô hình Giao tiếp Giữa Các Service](#310-mô-hình-giao-tiếp-giữa-các-service)
 - [CHƯƠNG 4. YÊU CẦU PHI CHỨC NĂNG (NON-FUNCTIONAL REQUIREMENTS)](#chương-4-yêu-cầu-phi-chức-năng-non-functional-requirements)
   - [4.1. NFR1: Yêu cầu về Hiệu năng (Performance)](#41-nfr1-yêu-cầu-về-hiệu-năng-performance)
   - [4.2. NFR2: Yêu cầu về Bảo mật (Security)](#42-nfr2-yêu-cầu-về-bảo-mật-security)
   - [4.3. NFR3: Yêu cầu về Tính Sẵn sàng & Độ tin cậy (Availability & Reliability)](#43-nfr3-yêu-cầu-về-tính-sẵn-sàng--độ-tin-cậy-availability--reliability)
   - [4.4. NFR4: Yêu cầu về Tính Dễ sử dụng (Usability)](#44-nfr4-yêu-cầu-về-tính-dễ-sử-dụng-usability)
   - [4.5. NFR5: Yêu cầu về Giới hạn Tài nguyên (Resource Constraints)](#45-nfr5-yêu-cầu-về-giới-hạn-tài-nguyên-resource-constraints)
+- [CHƯƠNG 5: YÊU CẦU VẬN HÀNH (OPERATIONAL REQUIREMENTS)](#chương-5-yêu-cầu-vận-hành-operational-requirements)
+- [CHƯƠNG 6. QUẢN LÝ SECRETS VÀ KEY ROTATION](#chương-6-quản-lý-secrets-và-key-rotation)
+- [CHƯƠNG 7: LÊN KẾ HOẠCH KHẢ NĂNG MỞ RỘNG (SCALABILITY PLANNING)](#chương-7-lên-kế-hoạch-khả-năng-mở-rộng-scalability-planning)
+- [CHƯƠNG 8: CHIẾN LƯỢC TRIỂN KHAI (DEPLOYMENT STRATEGY)](#chương-8-chiến-lược-triển-khai-deployment-strategy)
+- [CHƯƠNG 9: CHIẾN LƯỢC KIỂM THỬ (TESTING STRATEGY)](#chương-9-chiến-lược-kiểm-thử-testing-strategy)
+- [CHƯƠNG 10: TÀI LIỆU CÁC SẢN PHẨM (PRODUCT DOCUMENTATION)](#chương-10-tài-liệu-các-sản-phẩm-product-documentation)
+- [PHỤ LỤC B: THIẾT KẾ SCHEMA CƠ SỞ DỮ LIỆU](#phụ-lục-b-thiết-kế-schema-cơ-sở-dữ-liệu)
+- [PHỤ LỤC C: ĐẶC TẢ API VÀ EVENTS](#phụ-lục-c-đặc-tả-api-và-events)
+- [PHỤ LỤC D: SEQUENCE DIAGRAMS](#phụ-lục-d-sequence-diagrams)
+- [PHỤ LỤC E: SƠ ĐỒ QUAN HỆ THỰC THỂ (ER DIAGRAMS)](#phụ-lục-e-sơ-đồ-quan-hệ-thực-thể-er-diagrams)
+- [PHỤ LỤC F: TIÊU CHÍ CHẤP NHẬN (ACCEPTANCE CRITERIA)](#phụ-lục-f-tiêu-chí-chấp-nhận-acceptance-criteria)
 
 ---
 
@@ -56,7 +70,7 @@ Tài liệu này sẽ là cơ sở để:
 - Thiết lập sự hiểu biết chung về các yêu cầu của dự án giữa các bên liên quan.
 
 ### 1.2. Phạm vi dự án
-Nexus Deploy là một nền tảng Nền tảng như một Dịch vụ (PaaS - Platform-as-a-Service) hoàn chỉnh, được thiết kế để đơn giản hóa tối đa quy trình triển khai ứng dụng web cho lập trình viên.
+Nexus Deploy là một nền tảng như một Dịch vụ (PaaS - Platform-as-a-Service) hoàn chỉnh, được thiết kế để đơn giản hóa tối đa quy trình triển khai ứng dụng web cho lập trình viên.
 Phạm vi của dự án bao gồm các chức năng chính sau:
 1.  **Tích hợp GitHub:** Người dùng đăng nhập vào hệ thống bằng tài khoản GitHub (thông qua OAuth) và chọn các kho mã nguồn (repository) của họ để triển khai.
 2.  **Tích hợp liên tục (CI):** Khi người dùng git push lên kho mã nguồn đã chọn, hệ thống sẽ tự động kích hoạt một quy trình (pipeline) build và test trong một môi trường Docker cô lập.
@@ -106,7 +120,7 @@ Nexus Deploy là một hệ thống web độc lập, hoạt động như một 
 Hệ thống sẽ tương tác và phụ thuộc vào các thành phần bên ngoài sau:
 - **GitHub:** Dùng làm nhà cung cấp xác thực (OAuth) và nguồn mã nguồn. Nexus Deploy sử dụng API của GitHub để liệt kê kho (repo) và tự động cài đặt Webhook.
 - **Traefik:** Đóng vai trò là Reverse Proxy (Proxy ngược) ở tầng biên, chịu trách nhiệm định tuyến các tên miền con (subdomain) đến đúng container ứng dụng và tự động quản lý chứng chỉ SSL.
-- **Docker Engine:** Môi trường thực thi lỗi. Nexus Deploy sử dụng Docker SDK for Go để tạo, quản lý và hủy các container một cách cô lập cho cả quá trình CI (build/test) và CD (host).
+- **Docker Engine:** Môi trường thực thi. Nexus Deploy sử dụng Docker SDK for Go để tạo, quản lý và hủy các container một cách cô lập cho cả quá trình CI (build/test) và CD (host).
 - **LLM API (External):** Một dịch vụ Mô hình Ngôn ngữ Lớn bên ngoài (như Gemini hoặc GPT) được gọi để thực hiện chức năng phân tích log lỗi.
 
 ### 2.2. Tác nhân và Người dùng (Actors and Users)
@@ -282,7 +296,7 @@ Phần này định nghĩa ranh giới và quyền hạn của từng service đ
 | **FR2.4** | Cấu hình Preset | - **Mô tả:** `Project Service` lưu trữ và quản lý cấu hình `preset` (ví dụ: Node.js, Go) cho mỗi dự án.<br>- **Chi tiết kỹ thuật:** Cấu hình này bao gồm các lệnh build/start mặc định. |
 | **FR2.5** | Cấu hình Lệnh (UI) | - **Mô tả:** `Project Service` cho phép cập nhật các lệnh build và start tùy chỉnh cho một dự án.<br>- **Chi tiết kỹ thuật:** Các lệnh này được lưu trong bảng `projects` của `project_db`. |
 | **FR2.6** | Cấu hình Port (Nâng cao) | - **Mô tả:** `Project Service` cho phép người dùng ghi đè port nội bộ của ứng dụng.<br>- **Chi tiết kỹ thuật:** Port này sẽ được `Deployment Service` sử dụng khi triển khai. |
-| **FR2.7** | Xóa Dự án | - **Mô tả:** `Project Service` điều phối việc xóa dự án, bao gồm gọi `Deployment Service` để dừng container và gọi GitHub API để gỡ webhook.<br>- **Chi-tiết kỹ thuật:** Đây là một saga transaction đơn giản để đảm bảo tính nhất quán. |
+| **FR2.7** | Xóa Dự án | - **Mô tả:** `Project Service` điều phối việc xóa dự án, bao gồm gọi `Deployment Service` để dừng container và gọi GitHub API để gỡ webhook.<br>- **Chi tiết kỹ thuật:** Đây là một saga transaction đơn giản để đảm bảo tính nhất quán. |
 
 ### 3.3. FR3: Quản lý Biến môi trường (Secrets)
 
@@ -933,7 +947,7 @@ erDiagram
 ---
 
 
-### 3.2. Mô hình Giao tiếp Giữa Các Service
+### 3.10. Mô hình Giao tiếp Giữa Các Service
 
 Bảng này định nghĩa các mẫu giao tiếp chính. 
 
@@ -1255,7 +1269,7 @@ Các luồng sau đây được xác định là quan trọng và cần được
 
 - **Tài liệu hóa Docker Compose setup:**
     - File `docker-compose.yml` sẽ định nghĩa tất cả các service cần thiết cho môi trường phát triển cục bộ.
-    - Các service backend sẽ sử dụng image `golang:1.21-alpine` và `tail -f /dev/null` làm placeholder cho đến khi code được viết.
+    - Các service backend sẽ sử dụng image `golang:1.23-alpine` và `tail -f /dev/null` làm placeholder cho đến khi code được viết.
     - PostgreSQL và Redis sẽ được cấu hình với persistent volumes.
 - **Cấu hình Hot Reload cho Development:**
     - Các service Go backend sẽ sử dụng các công cụ như `air` hoặc `fresh` để tự động biên dịch lại và khởi động lại service khi có thay đổi trong mã nguồn.
