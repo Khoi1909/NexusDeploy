@@ -1,4 +1,3 @@
-version: '3.8'
 
 services:
   # ------------------ Infrastructure ------------------
@@ -7,32 +6,32 @@ services:
     container_name: nexus_postgres
     environment:
       POSTGRES_USER: nexus
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: nexus_main # Will create separate DBs using a script
+      POSTGRES_PASSWORD: nexus_dev
+      POSTGRES_MULTIPLE_DATABASES: auth_db,project_db,build_db
     ports:
       - "5432:5432"
     volumes:
-      - ./data/postgres:/var/lib/postgresql/data
-      - ./scripts/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh
+      - postgres_data:/var/lib/postgresql/data
+      - ./deployments/postgres/init-multiple-dbs.sh:/docker-entrypoint-initdb.d/init-dbs.sh
     networks:
       - nexus-network
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U nexus"]
-      interval: 10s
-      timeout: 5s
+      interval: 5s
+      timeout: 3s
       retries: 5
 
   redis:
     image: redis:7-alpine
     container_name: nexus_redis
     ports:
-      - "6379:6379"
+      - "6380:6379"  # Host Redis on 6379, so use 6380
     networks:
       - nexus-network
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
+      interval: 5s
+      timeout: 3s
       retries: 5
 
   traefik:
@@ -40,12 +39,13 @@ services:
     container_name: nexus_traefik
     command:
       - "--api.insecure=true"
+      - "--api.dashboard=true"
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
-      - "--entrypoints.web.address=:80"
+      - "--entrypoints.web.address=:77"
     ports:
-      - "80:80"
-      - "8080:8080" # Traefik Dashboard
+      - "666:80"
+      - "7070:8080" # Traefik Dashboard (internal 8080 → host 7070)
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
@@ -53,81 +53,248 @@ services:
 
   # ------------------ Backend Services ------------------
   api-gateway:
-    image: golang:1.21-alpine
+    build:
+      context: ./backend
+      dockerfile: services/api-gateway/Dockerfile
     container_name: nexus_api_gateway
-    command: tail -f /dev/null # Placeholder
+    ports:
+      - "8000:8000"
     networks:
       - nexus-network
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      - SERVER_PORT=8000
+      - AUTH_SERVICE_ADDR=auth-service:50051
+      - PROJECT_SERVICE_ADDR=project-service:50052
+      - REDIS_HOST=redis
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.api-gateway.rule=Host(`localhost`) && PathPrefix(`/api`)"
       - "traefik.http.services.api-gateway.loadbalancer.server.port=8000"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   auth-service:
-    image: golang:1.21-alpine
+    build:
+      context: ./backend
+      dockerfile: services/auth-service/Dockerfile
     container_name: nexus_auth_service
-    command: tail -f /dev/null # Placeholder
+    ports:
+      - "9001:8080"  # Avoid system services, use 9000+ range
+      - "50051:50051"
     networks:
       - nexus-network
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=nexus
+      - DB_PASSWORD=nexus_dev
+      - DB_NAME=auth_db
+      - REDIS_HOST=redis
+      # GitHub OAuth - Thay bằng credentials của bạn
+      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
+      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
+      - GITHUB_REDIRECT_URL=http://localhost:8000/auth/github/callback
+      - FRONTEND_URL=$(FRONTEND_URL)
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   project-service:
-    image: golang:1.21-alpine
+    build:
+      context: ./backend
+      dockerfile: services/project-service/Dockerfile
     container_name: nexus_project_service
-    command: tail -f /dev/null # Placeholder
+    ports:
+      - "9002:8080"  # Use 9000+ range
+      - "50052:50052"
     networks:
       - nexus-network
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=nexus
+      - DB_PASSWORD=nexus_dev
+      - DB_NAME=project_db
+      - REDIS_HOST=redis
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-default-dev-encryption-key-32b}
+      - GITHUB_WEBHOOK_CALLBACK_URL=http://localhost:8000/webhooks/github
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   build-service:
-    image: golang:1.21-alpine
+    build:
+      context: ./backend
+      dockerfile: services/build-service/Dockerfile
     container_name: nexus_build_service
-    command: tail -f /dev/null # Placeholder
+    ports:
+      - "9003:8080"  # Fixed: Use 9000+ range to avoid conflicts
+      - "50053:50053"
     networks:
       - nexus-network
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=nexus
+      - DB_PASSWORD=nexus_dev
+      - DB_NAME=build_db
+      - REDIS_HOST=redis
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   runner-service:
-    image: golang:1.21-alpine
+    build:
+      context: ./backend
+      dockerfile: services/runner-service/Dockerfile
     container_name: nexus_runner_service
-    command: tail -f /dev/null # Placeholder
+    ports:
+      - "9004:8080"  # Fixed: Use 9000+ range to avoid conflicts
+      - "50054:50054"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - runner_builds:/tmp/nexus-builds
     networks:
       - nexus-network
+    depends_on:
+      - postgres
+      - redis
+      - build-service
+      - project-service
+    environment:
+      - REDIS_HOST=redis
+      - BUILD_SERVICE_ADDR=build-service:50053
+      - PROJECT_SERVICE_ADDR=project-service:50052
+      - RUNNER_CONCURRENCY=2
+      - BUILD_WORK_DIR=/tmp/nexus-builds
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   deployment-service:
-    image: golang:1.21-alpine
+    build:
+      context: ./backend
+      dockerfile: services/deployment-service/Dockerfile
     container_name: nexus_deployment_service
-    command: tail -f /dev/null # Placeholder
+    ports:
+      - "9005:8080"  # Fixed: Use 9000+ range to avoid conflicts
+      - "50055:50055"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - nexus-network
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      - REDIS_HOST=redis
+      - TRAEFIK_NETWORK=nexus-network
+      - TRAEFIK_ENTRYPOINT=web
+      - TRAEFIK_DOMAIN_SUFFIX=${TRAEFIK_DOMAIN_SUFFIX:-localhost}
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   ai-service:
-    image: golang:1.21-alpine
+    build:
+      context: ./backend
+      dockerfile: services/ai-service/Dockerfile
     container_name: nexus_ai_service
-    command: tail -f /dev/null # Placeholder
+    ports:
+      - "9006:8080"  # Fixed: Use 9000+ range to avoid conflicts
+      - "50056:50056"
     networks:
       - nexus-network
+    depends_on:
+      - redis
+    environment:
+      - REDIS_HOST=redis
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   notification-service:
-    image: golang:1.21-alpine
+    build:
+      context: ./backend
+      dockerfile: services/notification-service/Dockerfile
     container_name: nexus_notification_service
-    command: tail -f /dev/null # Placeholder
+    ports:
+      - "9007:8080"  # Fixed: Use 9000+ range to avoid conflicts
+      - "50057:50057"
     networks:
       - nexus-network
+    depends_on:
+      - redis
+    environment:
+      - REDIS_HOST=redis
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   # ------------------ Frontend Service ------------------
-  frontend:
-    image: node:18-alpine
-    container_name: nexus_frontend
-    command: tail -f /dev/null # Placeholder
-    networks:
-      - nexus-network
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.frontend.rule=Host(`localhost`)"
-      - "traefik.http.services.frontend.loadbalancer.server.port=3000"
+  # Commented out - running frontend separately
+  # frontend:
+  #   build:
+  #     context: ./frontend
+  #     dockerfile: Dockerfile
+  #     target: runner  # Production build
+  #   container_name: nexus_frontend
+  #   networks:
+  #     - nexus-network
+  #   ports:
+  #     - "3000:3000"
+  #   environment:
+  #     - NODE_ENV=production
+  #     - NEXT_PUBLIC_API_URL=http://localhost:8000
+  #     - NEXT_PUBLIC_WS_URL=ws://localhost:8007
+  #   depends_on:
+  #     api-gateway:
+  #       condition: service_started
+  #   labels:
+  #     - "traefik.enable=true"
+  #     - "traefik.http.routers.frontend.rule=Host(`localhost`)"
+  #     - "traefik.http.routers.frontend.entrypoints=web"
+  #     - "traefik.http.services.frontend.loadbalancer.server.port=3000"
+  #   healthcheck:
+  #     test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+  #     interval: 30s
+  #     timeout: 5s
+  #     retries: 3
+  #     start_period: 10s
 
 networks:
   nexus-network:
     driver: bridge
+
+volumes:
+  postgres_data:
+  runner_builds:

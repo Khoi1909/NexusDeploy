@@ -1,0 +1,232 @@
+syntax = "proto3";
+
+package project;
+
+option go_package = "github.com/nexusdeploy/backend/services/project-service/proto";
+
+import "google/protobuf/timestamp.proto";
+
+// Project Service - Project, repository, and secrets management
+service ProjectService {
+  // Project CRUD
+  rpc CreateProject(CreateProjectRequest) returns (CreateProjectResponse);
+  rpc GetProject(GetProjectRequest) returns (GetProjectResponse);
+  rpc ListProjects(ListProjectsRequest) returns (ListProjectsResponse);
+  rpc UpdateProject(UpdateProjectRequest) returns (UpdateProjectResponse);
+  rpc DeleteProject(DeleteProjectRequest) returns (DeleteProjectResponse);
+  
+  // GitHub integration
+  rpc ListRepositories(ListRepositoriesRequest) returns (ListRepositoriesResponse);
+  rpc SetupWebhook(SetupWebhookRequest) returns (SetupWebhookResponse);
+  rpc DeleteWebhook(DeleteWebhookRequest) returns (DeleteWebhookResponse);
+  
+  // Secrets management
+  rpc AddSecret(AddSecretRequest) returns (AddSecretResponse);
+  rpc UpdateSecret(UpdateSecretRequest) returns (UpdateSecretResponse);
+  rpc DeleteSecret(DeleteSecretRequest) returns (DeleteSecretResponse);
+  rpc ListSecrets(ListSecretsRequest) returns (ListSecretsResponse);
+  rpc GetSecrets(GetSecretsRequest) returns (GetSecretsResponse); // Internal: returns decrypted values for Runner
+}
+
+// ==================== Project Messages ====================
+
+message Project {
+  string id = 1;
+  string user_id = 2;
+  string name = 3;
+  string repo_url = 4;
+  string branch = 5;
+  string preset = 6; // nodejs, go, python, docker, static
+  string build_command = 7;
+  string start_command = 8;
+  int32 port = 9;
+  int64 github_repo_id = 10;
+  bool is_private = 11;
+  google.protobuf.Timestamp created_at = 12;
+  google.protobuf.Timestamp updated_at = 13;
+}
+
+message CreateProjectRequest {
+  string user_id = 1;
+  string name = 2;
+  string repo_url = 3;
+  string branch = 4;
+  string preset = 5;
+  string build_command = 6;
+  string start_command = 7;
+  int32 port = 8;
+  int64 github_repo_id = 9;
+  bool is_private = 10;
+  string github_access_token = 11; // For webhook setup
+}
+
+message CreateProjectResponse {
+  Project project = 1;
+  string error = 2;
+}
+
+message GetProjectRequest {
+  string project_id = 1;
+  string user_id = 2; // For permission check
+}
+
+message GetProjectResponse {
+  Project project = 1;
+  string error = 2;
+}
+
+message ListProjectsRequest {
+  string user_id = 1;
+  int32 page = 2;
+  int32 page_size = 3;
+}
+
+message ListProjectsResponse {
+  repeated Project projects = 1;
+  int32 total = 2;
+  string error = 3;
+}
+
+message UpdateProjectRequest {
+  string project_id = 1;
+  string user_id = 2;
+  string name = 3;
+  string branch = 4;
+  string preset = 5;
+  string build_command = 6;
+  string start_command = 7;
+  int32 port = 8;
+}
+
+message UpdateProjectResponse {
+  Project project = 1;
+  string error = 2;
+}
+
+message DeleteProjectRequest {
+  string project_id = 1;
+  string user_id = 2;
+  string github_access_token = 3; // For webhook deletion
+}
+
+message DeleteProjectResponse {
+  bool success = 1;
+  string error = 2;
+}
+
+// ==================== Repository Messages ====================
+
+message Repository {
+  int64 id = 1;
+  string name = 2;
+  string full_name = 3;
+  string clone_url = 4;
+  string html_url = 5;
+  bool is_private = 6;
+  string description = 7;
+  string language = 8;
+  string default_branch = 9;
+}
+
+message ListRepositoriesRequest {
+  string user_id = 1;
+  string github_access_token = 2;
+}
+
+message ListRepositoriesResponse {
+  repeated Repository repositories = 1;
+  string error = 2;
+}
+
+// ==================== Webhook Messages ====================
+
+message SetupWebhookRequest {
+  string project_id = 1;
+  string user_id = 2;
+  string callback_url = 3;
+  string github_access_token = 4;
+}
+
+message SetupWebhookResponse {
+  bool success = 1;
+  int64 webhook_id = 2;
+  string error = 3;
+}
+
+message DeleteWebhookRequest {
+  string project_id = 1;
+  string user_id = 2;
+  string github_access_token = 3;
+}
+
+message DeleteWebhookResponse {
+  bool success = 1;
+  string error = 2;
+}
+
+// ==================== Secret Messages ====================
+
+message Secret {
+  string id = 1;
+  string project_id = 2;
+  string name = 3;
+  // Note: value is never returned in ListSecrets, only in GetSecrets (internal)
+  google.protobuf.Timestamp created_at = 4;
+  google.protobuf.Timestamp updated_at = 5;
+}
+
+message AddSecretRequest {
+  string project_id = 1;
+  string user_id = 2;
+  string name = 3;
+  string value = 4; // Plain text, will be encrypted before storage
+}
+
+message AddSecretResponse {
+  Secret secret = 1;
+  string error = 2;
+}
+
+message UpdateSecretRequest {
+  string secret_id = 1;
+  string project_id = 2;
+  string user_id = 3;
+  string value = 4; // New value to encrypt
+}
+
+message UpdateSecretResponse {
+  Secret secret = 1;
+  string error = 2;
+}
+
+message DeleteSecretRequest {
+  string secret_id = 1;
+  string project_id = 2;
+  string user_id = 3;
+}
+
+message DeleteSecretResponse {
+  bool success = 1;
+  string error = 2;
+}
+
+message ListSecretsRequest {
+  string project_id = 1;
+  string user_id = 2;
+}
+
+message ListSecretsResponse {
+  repeated Secret secrets = 1; // Values are masked
+  string error = 2;
+}
+
+// GetSecrets is for internal use by Runner Service only
+message GetSecretsRequest {
+  string project_id = 1;
+  // Note: This should be authenticated via mTLS or service-to-service auth
+}
+
+message GetSecretsResponse {
+  map<string, string> secrets = 1; // name -> decrypted value
+  string error = 2;
+}

@@ -1,0 +1,121 @@
+syntax = "proto3";
+
+package deployment;
+
+option go_package = "github.com/nexusdeploy/backend/services/deployment-service/proto";
+
+import "google/protobuf/timestamp.proto";
+
+// Deployment Service - Container deployment and lifecycle management
+service DeploymentService {
+  // Deploy a new container from an image
+  rpc Deploy(DeployRequest) returns (DeployResponse);
+  
+  // Stop and remove a deployment
+  rpc StopDeployment(StopDeploymentRequest) returns (StopDeploymentResponse);
+  
+  // Get status of a deployment
+  rpc GetDeploymentStatus(GetDeploymentStatusRequest) returns (GetDeploymentStatusResponse);
+  
+  // Restart a deployment
+  rpc RestartDeployment(RestartDeploymentRequest) returns (RestartDeploymentResponse);
+  
+  // Get runtime logs from a container
+  rpc GetRuntimeLogs(GetRuntimeLogsRequest) returns (GetRuntimeLogsResponse);
+}
+
+// ==================== Deploy Messages ====================
+
+message DeploymentSpec {
+  string project_id = 1;
+  string build_id = 2;
+  string image_tag = 3;
+  int32 port = 4;                    // Container internal port
+  string domain = 5;                 // Subdomain for routing
+  map<string, string> env_vars = 6;  // Environment variables
+  map<string, string> secrets = 7;   // Decrypted secrets
+  ResourceLimits resources = 8;
+  string user_id = 9;
+}
+
+message ResourceLimits {
+  int64 memory_mb = 1;   // Memory limit in MB
+  int32 cpu_cores = 2;   // CPU cores (1 = 1 core)
+}
+
+message DeployRequest {
+  DeploymentSpec spec = 1;
+}
+
+message DeployResponse {
+  string deployment_id = 1;
+  string container_id = 2;
+  string status = 3;       // "running", "pending", "failed"
+  string public_url = 4;   // The accessible URL
+  string error = 5;
+}
+
+// ==================== Stop Messages ====================
+
+message StopDeploymentRequest {
+  string deployment_id = 1;
+  string project_id = 2;
+}
+
+message StopDeploymentResponse {
+  bool success = 1;
+  string error = 2;
+}
+
+// ==================== Status Messages ====================
+
+enum DeploymentStatus {
+  DEPLOYMENT_STATUS_UNSPECIFIED = 0;
+  DEPLOYMENT_STATUS_PENDING = 1;
+  DEPLOYMENT_STATUS_RUNNING = 2;
+  DEPLOYMENT_STATUS_STOPPED = 3;
+  DEPLOYMENT_STATUS_FAILED = 4;
+  DEPLOYMENT_STATUS_RESTARTING = 5;
+}
+
+message GetDeploymentStatusRequest {
+  string deployment_id = 1;
+  string project_id = 2;
+}
+
+message GetDeploymentStatusResponse {
+  string deployment_id = 1;
+  string container_id = 2;
+  DeploymentStatus status = 3;
+  string public_url = 4;
+  google.protobuf.Timestamp started_at = 5;
+  string error = 6;
+}
+
+// ==================== Restart Messages ====================
+
+message RestartDeploymentRequest {
+  string deployment_id = 1;
+  string project_id = 2;
+}
+
+message RestartDeploymentResponse {
+  bool success = 1;
+  string container_id = 2;
+  string error = 3;
+}
+
+// ==================== Runtime Logs Messages ====================
+
+message GetRuntimeLogsRequest {
+  string deployment_id = 1;
+  string project_id = 2;
+  int32 tail_lines = 3;    // Number of lines to return (0 = all)
+  bool follow = 4;         // Stream logs (not implemented in unary)
+}
+
+message GetRuntimeLogsResponse {
+  repeated string log_lines = 1;
+  string error = 2;
+}
+

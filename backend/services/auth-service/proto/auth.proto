@@ -1,0 +1,144 @@
+syntax = "proto3";
+
+package auth;
+
+option go_package = "github.com/nexusdeploy/backend/services/auth-service/proto";
+
+// Auth Service - User authentication, authorization, and OAuth orchestration
+service AuthService {
+  // OAuth: start browser redirect (returns GitHub authorize URL with state)
+  rpc StartOAuthFlow (StartOAuthRequest) returns (StartOAuthResponse);
+  // OAuth callback handler: exchange code -> app tokens
+  rpc HandleOAuthCallback (HandleOAuthRequest) returns (HandleOAuthResponse);
+
+  // Validate JWT token and return user info
+  rpc ValidateToken (ValidateTokenRequest) returns (ValidateTokenResponse);
+  
+  // Get user's plan (free, premium)
+  rpc GetUserPlan (GetUserPlanRequest) returns (GetUserPlanResponse);
+  
+  // Check if user has permission for a resource
+  rpc CheckPermission (CheckPermissionRequest) returns (CheckPermissionResponse);
+  
+  // Get user info by ID
+  rpc GetUserInfo (GetUserInfoRequest) returns (GetUserInfoResponse);
+
+  // Refresh access token using refresh token (per SRS 6.4)
+  rpc RefreshToken (RefreshTokenRequest) returns (RefreshTokenResponse);
+
+  // Revoke an access token (blacklist by JTI)
+  rpc RevokeToken (RevokeTokenRequest) returns (RevokeTokenResponse);
+
+  // Get GitHub access token for internal service use (Project Service, Runner Service)
+  rpc GetGitHubToken (GetGitHubTokenRequest) returns (GetGitHubTokenResponse);
+}
+
+// --- OAuth messages ---
+message StartOAuthRequest {
+  // Optional: caller-provided return URL (overrides configured redirect)
+  string redirect_url = 1;
+}
+
+message StartOAuthResponse {
+  string auth_url = 1;
+  string state = 2;
+  string error = 3;
+}
+
+message HandleOAuthRequest {
+  string code = 1;   // authorization_code from GitHub
+  string state = 2;
+}
+
+message HandleOAuthResponse {
+  string access_token = 1;
+  string refresh_token = 2;
+  string user_id = 3;
+  string plan = 4;
+  int64  expires_at_unix = 5; // epoch seconds
+  string error = 6;
+}
+
+// ValidateToken
+message ValidateTokenRequest {
+  string token = 1; // JWT issued by Auth Service
+}
+
+message ValidateTokenResponse {
+  bool   valid = 1;
+  string user_id = 2;
+  string username = 3;
+  string plan = 4;
+  string avatar_url = 5;
+  string error = 6;
+}
+
+// GetUserPlan
+message GetUserPlanRequest {
+  string user_id = 1;
+}
+
+message GetUserPlanResponse {
+  string plan = 1; // "standard" | "premium"
+  int32  max_projects = 2;
+  int32  max_builds_per_month = 3;
+  int32  rate_limit_per_window = 4; // Rate limit requests per window
+  string error = 5;
+}
+
+// CheckPermission
+message CheckPermissionRequest {
+  string user_id = 1;
+  string resource_type = 2; // "project", "build", "deployment", "custom_domain"
+  string resource_id = 3;
+  string action = 4; // "read", "write", "delete", "use"
+}
+
+message CheckPermissionResponse {
+  bool   allowed = 1;
+  string reason = 2;
+  string error  = 3;
+}
+
+// GetUserInfo
+message GetUserInfoRequest {
+  string user_id = 1;
+}
+
+message GetUserInfoResponse {
+  string user_id = 1;
+  string username = 2;
+  string email = 3;
+  string avatar_url = 4;
+  string plan = 5;
+  int64  github_id = 6;
+  string error = 7;
+}
+
+// Token rotation
+message RefreshTokenRequest {
+  string refresh_token = 1;
+}
+
+message RefreshTokenResponse {
+  string access_token = 1;
+  string refresh_token = 2;
+  int64  expires_at_unix = 3;
+  string error = 4;
+}
+
+message RevokeTokenRequest {
+  string access_token = 1;
+}
+message RevokeTokenResponse {}
+
+// GetGitHubToken - Internal use only
+message GetGitHubTokenRequest {
+  string user_id = 1;
+}
+
+message GetGitHubTokenResponse {
+  string github_token = 1;  // Decrypted GitHub access token
+  string error = 2;
+}
+

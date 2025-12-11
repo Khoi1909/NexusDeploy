@@ -1,0 +1,164 @@
+syntax = "proto3";
+
+package build;
+
+option go_package = "github.com/nexusdeploy/backend/services/build-service/proto";
+
+import "google/protobuf/timestamp.proto";
+
+// Build Service - CI/CD Pipeline Orchestrator
+service BuildService {
+  // Trigger a new build (called by API Gateway when webhook received)
+  rpc TriggerBuild(TriggerBuildRequest) returns (TriggerBuildResponse);
+  
+  // Update build status (called by Runner Service)
+  rpc UpdateBuildStatus(UpdateBuildStatusRequest) returns (UpdateBuildStatusResponse);
+  
+  // List builds for a project (called by API Gateway)
+  rpc ListBuilds(ListBuildsRequest) returns (ListBuildsResponse);
+  
+  // Get build details (called by API Gateway, AI Service)
+  rpc GetBuild(GetBuildRequest) returns (GetBuildResponse);
+  
+  // Get build logs (called by AI Service for error analysis)
+  rpc GetBuildLogs(GetBuildLogsRequest) returns (GetBuildLogsResponse);
+  
+  // Append logs to a build (called by Runner Service)
+  rpc AppendBuildLogs(AppendBuildLogsRequest) returns (AppendBuildLogsResponse);
+  
+  // Delete logs for builds in a project (called by API Gateway)
+  rpc DeleteBuildLogs(DeleteBuildLogsRequest) returns (DeleteBuildLogsResponse);
+}
+
+// Build status enum matching state machine in SRS 3.4.1
+enum BuildStatus {
+  BUILD_STATUS_UNSPECIFIED = 0;
+  BUILD_STATUS_PENDING = 1;
+  BUILD_STATUS_RUNNING = 2;
+  BUILD_STATUS_FAILED = 3;
+  BUILD_STATUS_BUILDING_IMAGE = 4;
+  BUILD_STATUS_PUSHING_IMAGE = 5;
+  BUILD_STATUS_DEPLOYING = 6;
+  BUILD_STATUS_SUCCESS = 7;
+  BUILD_STATUS_DEPLOY_FAILED = 8;
+}
+
+// Build message
+message Build {
+  string id = 1;
+  string project_id = 2;
+  string commit_sha = 3;
+  BuildStatus status = 4;
+  google.protobuf.Timestamp started_at = 5;
+  google.protobuf.Timestamp finished_at = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+}
+
+// BuildStep message
+message BuildStep {
+  string id = 1;
+  string build_id = 2;
+  string step_name = 3;
+  string status = 4;
+  int32 duration_ms = 5;
+}
+
+// BuildLog message
+message BuildLog {
+  int64 id = 1;
+  string build_id = 2;
+  google.protobuf.Timestamp timestamp = 3;
+  string log_line = 4;
+}
+
+// --- TriggerBuild ---
+message TriggerBuildRequest {
+  string project_id = 1;
+  string commit_sha = 2;
+  string branch = 3;
+  string repo_url = 4;
+  string user_id = 5; // For permission check
+}
+
+message TriggerBuildResponse {
+  Build build = 1;
+  string error = 2;
+}
+
+// --- UpdateBuildStatus ---
+message UpdateBuildStatusRequest {
+  string build_id = 1;
+  BuildStatus status = 2;
+  repeated string log_lines = 3; // Optional: append logs when updating
+  string image_tag = 4;          // Set when status is PUSHING_IMAGE or later
+}
+
+message UpdateBuildStatusResponse {
+  bool acknowledged = 1;
+  string error = 2;
+}
+
+// --- ListBuilds ---
+message ListBuildsRequest {
+  string project_id = 1;
+  string user_id = 2;
+  int32 page = 3;
+  int32 page_size = 4;
+}
+
+message ListBuildsResponse {
+  repeated Build builds = 1;
+  int32 total = 2;
+  string error = 3;
+}
+
+// --- GetBuild ---
+message GetBuildRequest {
+  string build_id = 1;
+  string user_id = 2; // For permission check
+}
+
+message GetBuildResponse {
+  Build build = 1;
+  repeated BuildStep steps = 2;
+  string error = 3;
+}
+
+// --- GetBuildLogs ---
+message GetBuildLogsRequest {
+  string build_id = 1;
+  int32 limit = 2;    // Max number of log lines to return
+  int64 after_id = 3; // For pagination: return logs after this ID
+}
+
+message GetBuildLogsResponse {
+  repeated BuildLog logs = 1;
+  bool has_more = 2;
+  string error = 3;
+}
+
+// --- AppendBuildLogs ---
+message AppendBuildLogsRequest {
+  string build_id = 1;
+  repeated string log_lines = 2;
+}
+
+message AppendBuildLogsResponse {
+  bool acknowledged = 1;
+  string error = 2;
+}
+
+// --- DeleteBuildLogs ---
+message DeleteBuildLogsRequest {
+  string project_id = 1;
+  string user_id = 2; // For permission check
+  repeated string build_ids = 3; // Optional: specific build IDs, if empty delete all for project
+}
+
+message DeleteBuildLogsResponse {
+  int32 builds_affected = 1;
+  int64 logs_deleted = 2;
+  string error = 3;
+}
+
