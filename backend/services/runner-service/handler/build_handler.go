@@ -142,9 +142,9 @@ func (h *BuildHandler) HandleBuildJob(ctx context.Context, payload *queue.BuildJ
 	var statusMessage string
 
 	if result.Success {
-		finalStatus = buildpb.BuildStatus_BUILD_STATUS_DEPLOYING
+		finalStatus = buildpb.BuildStatus_BUILD_STATUS_SUCCESS
 		statusMessage = fmt.Sprintf("Build successful, image: %s", result.ImageTag)
-		h.publisher.PublishBuildCompleted(ctx, buildID, "deploying", statusMessage)
+		h.publisher.PublishBuildCompleted(ctx, buildID, "success", statusMessage)
 	} else {
 		finalStatus = buildpb.BuildStatus_BUILD_STATUS_FAILED
 		statusMessage = fmt.Sprintf("Build failed: %v", result.Error)

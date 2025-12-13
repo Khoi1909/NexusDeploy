@@ -68,32 +68,56 @@ func NewClient() *Client {
 }
 
 // ListUserRepositories lists all repositories for the authenticated user
+// Handles pagination automatically to fetch all repositories
 func (c *Client) ListUserRepositories(ctx context.Context, accessToken string) ([]Repository, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", githubAPIURL+"/user/repos?per_page=100&sort=updated", nil)
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
+	var allRepos []Repository
+	page := 1
+	perPage := 100
+
+	for {
+		url := fmt.Sprintf("%s/user/repos?per_page=%d&page=%d&sort=updated", githubAPIURL, perPage, page)
+		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+		if err != nil {
+			return nil, fmt.Errorf("create request: %w", err)
+		}
+
+		req.Header.Set("Authorization", "Bearer "+accessToken)
+		req.Header.Set("Accept", "application/vnd.github.v3+json")
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("execute request: %w", err)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			return nil, fmt.Errorf("GitHub API error: %d - %s", resp.StatusCode, string(body))
+		}
+
+		var repos []Repository
+		if err := json.NewDecoder(resp.Body).Decode(&repos); err != nil {
+			resp.Body.Close()
+			return nil, fmt.Errorf("decode response: %w", err)
+		}
+		resp.Body.Close()
+
+		// If no repos returned, we've fetched all pages
+		if len(repos) == 0 {
+			break
+		}
+
+		allRepos = append(allRepos, repos...)
+
+		// If fewer repos returned than perPage, we've fetched all pages
+		if len(repos) < perPage {
+			break
+		}
+
+		page++
 	}
 
-	req.Header.Set("Authorization", "Bearer "+accessToken)
-	req.Header.Set("Accept", "application/vnd.github.v3+json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("execute request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("GitHub API error: %d - %s", resp.StatusCode, string(body))
-	}
-
-	var repos []Repository
-	if err := json.NewDecoder(resp.Body).Decode(&repos); err != nil {
-		return nil, fmt.Errorf("decode response: %w", err)
-	}
-
-	return repos, nil
+	return allRepos, nil
 }
 
 // CreateWebhook creates a webhook for a repository
@@ -190,17 +214,17 @@ func ParseRepoURL(repoURL string) (owner, repo string, err error) {
 	// https://github.com/owner/repo.git
 	// git@github.com:owner/repo.git
 	repoURL = strings.TrimSuffix(repoURL, ".git")
-	
+
 	if strings.HasPrefix(repoURL, "https://github.com/") {
 		path := strings.TrimPrefix(repoURL, "https://github.com/")
 		return ParseRepoFullName(path)
 	}
-	
+
 	if strings.HasPrefix(repoURL, "git@github.com:") {
 		path := strings.TrimPrefix(repoURL, "git@github.com:")
 		return ParseRepoFullName(path)
 	}
-	
+
 	return "", "", fmt.Errorf("unsupported repo URL format: %s", repoURL)
 }
 
@@ -212,4 +236,3 @@ func generateSecret(length int) (string, error) {
 	}
 	return hex.EncodeToString(bytes), nil
 }
-

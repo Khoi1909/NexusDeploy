@@ -11,6 +11,7 @@ import (
 	commonmw "github.com/nexusdeploy/backend/pkg/middleware"
 	apimw "github.com/nexusdeploy/backend/services/api-gateway/middleware"
 	projectpb "github.com/nexusdeploy/backend/services/project-service/proto"
+	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -31,8 +32,8 @@ type ProjectServiceClient interface {
 
 // ProjectHandler handles project-related requests
 type ProjectHandler struct {
-	Client           ProjectServiceClient
-	GetGitHubToken   func(ctx context.Context, userID string) (string, error) // Callback to get user's GitHub token
+	Client         ProjectServiceClient
+	GetGitHubToken func(ctx context.Context, userID string) (string, error) // Callback to get user's GitHub token
 }
 
 // NewProjectHandler creates a new ProjectHandler
@@ -332,15 +333,33 @@ func (h *ProjectHandler) ListRepositories(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Validate GetGitHubToken callback
+	if h.GetGitHubToken == nil {
+		log.Error().Str("user_id", userID).Msg("GetGitHubToken callback not set")
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error":   "internal_error",
+			"message": "GitHub token retrieval not configured",
+		})
+		return
+	}
+
 	// Get GitHub token
-	var githubToken string
-	if h.GetGitHubToken != nil {
-		var err error
-		githubToken, err = h.GetGitHubToken(r.Context(), userID)
-		if err != nil || githubToken == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "github_token_required"})
-			return
-		}
+	githubToken, err := h.GetGitHubToken(r.Context(), userID)
+	if err != nil {
+		log.Error().Err(err).Str("user_id", userID).Msg("Failed to get GitHub token")
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error":   "github_token_error",
+			"message": err.Error(),
+		})
+		return
+	}
+	if githubToken == "" {
+		log.Warn().Str("user_id", userID).Msg("GitHub token is empty")
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error":   "github_token_required",
+			"message": "GitHub token not found for user. Please re-authenticate.",
+		})
+		return
 	}
 
 	resp, err := h.Client.ListRepositories(r.Context(), &projectpb.ListRepositoriesRequest{
@@ -349,11 +368,13 @@ func (h *ProjectHandler) ListRepositories(w http.ResponseWriter, r *http.Request
 	})
 	if err != nil {
 		statusCode, message, _ := commonmw.HandleGRPCError(err)
+		log.Error().Err(err).Str("user_id", userID).Int("status_code", statusCode).Msg("Failed to list repositories via gRPC")
 		writeJSON(w, statusCode, map[string]string{"error": message})
 		return
 	}
 
 	if resp.Error != "" {
+		log.Error().Str("user_id", userID).Str("error", resp.Error).Msg("Project Service returned error when listing repositories")
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": resp.Error})
 		return
 	}

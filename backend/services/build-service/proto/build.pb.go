@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.10
 // 	protoc        v3.21.12
-// source: build.proto
+// source: proto/build.proto
 
 package proto
 
@@ -74,11 +74,11 @@ func (x BuildStatus) String() string {
 }
 
 func (BuildStatus) Descriptor() protoreflect.EnumDescriptor {
-	return file_build_proto_enumTypes[0].Descriptor()
+	return file_proto_build_proto_enumTypes[0].Descriptor()
 }
 
 func (BuildStatus) Type() protoreflect.EnumType {
-	return &file_build_proto_enumTypes[0]
+	return &file_proto_build_proto_enumTypes[0]
 }
 
 func (x BuildStatus) Number() protoreflect.EnumNumber {
@@ -87,7 +87,7 @@ func (x BuildStatus) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use BuildStatus.Descriptor instead.
 func (BuildStatus) EnumDescriptor() ([]byte, []int) {
-	return file_build_proto_rawDescGZIP(), []int{0}
+	return file_proto_build_proto_rawDescGZIP(), []int{0}
 }
 
 // Build message
@@ -101,13 +101,14 @@ type Build struct {
 	FinishedAt    *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=finished_at,json=finishedAt,proto3" json:"finished_at,omitempty"`
 	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	UpdatedAt     *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	ImageTag      string                 `protobuf:"bytes,9,opt,name=image_tag,json=imageTag,proto3" json:"image_tag,omitempty"` // Image tag được tạo bởi Runner Service
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Build) Reset() {
 	*x = Build{}
-	mi := &file_build_proto_msgTypes[0]
+	mi := &file_proto_build_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -119,7 +120,7 @@ func (x *Build) String() string {
 func (*Build) ProtoMessage() {}
 
 func (x *Build) ProtoReflect() protoreflect.Message {
-	mi := &file_build_proto_msgTypes[0]
+	mi := &file_proto_build_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -132,7 +133,7 @@ func (x *Build) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Build.ProtoReflect.Descriptor instead.
 func (*Build) Descriptor() ([]byte, []int) {
-	return file_build_proto_rawDescGZIP(), []int{0}
+	return file_proto_build_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *Build) GetId() string {
@@ -191,6 +192,13 @@ func (x *Build) GetUpdatedAt() *timestamppb.Timestamp {
 	return nil
 }
 
+func (x *Build) GetImageTag() string {
+	if x != nil {
+		return x.ImageTag
+	}
+	return ""
+}
+
 // BuildStep message
 type BuildStep struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -205,7 +213,7 @@ type BuildStep struct {
 
 func (x *BuildStep) Reset() {
 	*x = BuildStep{}
-	mi := &file_build_proto_msgTypes[1]
+	mi := &file_proto_build_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -217,7 +225,7 @@ func (x *BuildStep) String() string {
 func (*BuildStep) ProtoMessage() {}
 
 func (x *BuildStep) ProtoReflect() protoreflect.Message {
-	mi := &file_build_proto_msgTypes[1]
+	mi := &file_proto_build_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -230,7 +238,7 @@ func (x *BuildStep) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BuildStep.ProtoReflect.Descriptor instead.
 func (*BuildStep) Descriptor() ([]byte, []int) {
-	return file_build_proto_rawDescGZIP(), []int{1}
+	return file_proto_build_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *BuildStep) GetId() string {
@@ -281,7 +289,7 @@ type BuildLog struct {
 
 func (x *BuildLog) Reset() {
 	*x = BuildLog{}
-	mi := &file_build_proto_msgTypes[2]
+	mi := &file_proto_build_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -293,7 +301,7 @@ func (x *BuildLog) String() string {
 func (*BuildLog) ProtoMessage() {}
 
 func (x *BuildLog) ProtoReflect() protoreflect.Message {
-	mi := &file_build_proto_msgTypes[2]
+	mi := &file_proto_build_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -306,7 +314,7 @@ func (x *BuildLog) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BuildLog.ProtoReflect.Descriptor instead.
 func (*BuildLog) Descriptor() ([]byte, []int) {
-	return file_build_proto_rawDescGZIP(), []int{2}
+	return file_proto_build_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *BuildLog) GetId() int64 {
@@ -351,7 +359,7 @@ type TriggerBuildRequest struct {
 
 func (x *TriggerBuildRequest) Reset() {
 	*x = TriggerBuildRequest{}
-	mi := &file_build_proto_msgTypes[3]
+	mi := &file_proto_build_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -363,7 +371,7 @@ func (x *TriggerBuildRequest) String() string {
 func (*TriggerBuildRequest) ProtoMessage() {}
 
 func (x *TriggerBuildRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_build_proto_msgTypes[3]
+	mi := &file_proto_build_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -376,7 +384,7 @@ func (x *TriggerBuildRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TriggerBuildRequest.ProtoReflect.Descriptor instead.
 func (*TriggerBuildRequest) Descriptor() ([]byte, []int) {
-	return file_build_proto_rawDescGZIP(), []int{3}
+	return file_proto_build_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *TriggerBuildRequest) GetProjectId() string {
@@ -424,7 +432,7 @@ type TriggerBuildResponse struct {
 
 func (x *TriggerBuildResponse) Reset() {
 	*x = TriggerBuildResponse{}
-	mi := &file_build_proto_msgTypes[4]
+	mi := &file_proto_build_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -436,7 +444,7 @@ func (x *TriggerBuildResponse) String() string {
 func (*TriggerBuildResponse) ProtoMessage() {}
 
 func (x *TriggerBuildResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_build_proto_msgTypes[4]
+	mi := &file_proto_build_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -449,7 +457,7 @@ func (x *TriggerBuildResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TriggerBuildResponse.ProtoReflect.Descriptor instead.
 func (*TriggerBuildResponse) Descriptor() ([]byte, []int) {
-	return file_build_proto_rawDescGZIP(), []int{4}
+	return file_proto_build_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *TriggerBuildResponse) GetBuild() *Build {
@@ -479,7 +487,7 @@ type UpdateBuildStatusRequest struct {
 
 func (x *UpdateBuildStatusRequest) Reset() {
 	*x = UpdateBuildStatusRequest{}
-	mi := &file_build_proto_msgTypes[5]
+	mi := &file_proto_build_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -491,7 +499,7 @@ func (x *UpdateBuildStatusRequest) String() string {
 func (*UpdateBuildStatusRequest) ProtoMessage() {}
 
 func (x *UpdateBuildStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_build_proto_msgTypes[5]
+	mi := &file_proto_build_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -504,7 +512,7 @@ func (x *UpdateBuildStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateBuildStatusRequest.ProtoReflect.Descriptor instead.
 func (*UpdateBuildStatusRequest) Descriptor() ([]byte, []int) {
-	return file_build_proto_rawDescGZIP(), []int{5}
+	return file_proto_build_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *UpdateBuildStatusRequest) GetBuildId() string {
@@ -545,7 +553,7 @@ type UpdateBuildStatusResponse struct {
 
 func (x *UpdateBuildStatusResponse) Reset() {
 	*x = UpdateBuildStatusResponse{}
-	mi := &file_build_proto_msgTypes[6]
+	mi := &file_proto_build_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -557,7 +565,7 @@ func (x *UpdateBuildStatusResponse) String() string {
 func (*UpdateBuildStatusResponse) ProtoMessage() {}
 
 func (x *UpdateBuildStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_build_proto_msgTypes[6]
+	mi := &file_proto_build_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -570,7 +578,7 @@ func (x *UpdateBuildStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateBuildStatusResponse.ProtoReflect.Descriptor instead.
 func (*UpdateBuildStatusResponse) Descriptor() ([]byte, []int) {
-	return file_build_proto_rawDescGZIP(), []int{6}
+	return file_proto_build_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *UpdateBuildStatusResponse) GetAcknowledged() bool {
@@ -600,7 +608,7 @@ type ListBuildsRequest struct {
 
 func (x *ListBuildsRequest) Reset() {
 	*x = ListBuildsRequest{}
-	mi := &file_build_proto_msgTypes[7]
+	mi := &file_proto_build_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -612,7 +620,7 @@ func (x *ListBuildsRequest) String() string {
 func (*ListBuildsRequest) ProtoMessage() {}
 
 func (x *ListBuildsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_build_proto_msgTypes[7]
+	mi := &file_proto_build_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -625,7 +633,7 @@ func (x *ListBuildsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListBuildsRequest.ProtoReflect.Descriptor instead.
 func (*ListBuildsRequest) Descriptor() ([]byte, []int) {
-	return file_build_proto_rawDescGZIP(), []int{7}
+	return file_proto_build_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ListBuildsRequest) GetProjectId() string {
@@ -667,7 +675,7 @@ type ListBuildsResponse struct {
 
 func (x *ListBuildsResponse) Reset() {
 	*x = ListBuildsResponse{}
-	mi := &file_build_proto_msgTypes[8]
+	mi := &file_proto_build_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -679,7 +687,7 @@ func (x *ListBuildsResponse) String() string {
 func (*ListBuildsResponse) ProtoMessage() {}
 
 func (x *ListBuildsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_build_proto_msgTypes[8]
+	mi := &file_proto_build_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -692,7 +700,7 @@ func (x *ListBuildsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListBuildsResponse.ProtoReflect.Descriptor instead.
 func (*ListBuildsResponse) Descriptor() ([]byte, []int) {
-	return file_build_proto_rawDescGZIP(), []int{8}
+	return file_proto_build_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ListBuildsResponse) GetBuilds() []*Build {
@@ -727,7 +735,7 @@ type GetBuildRequest struct {
 
 func (x *GetBuildRequest) Reset() {
 	*x = GetBuildRequest{}
-	mi := &file_build_proto_msgTypes[9]
+	mi := &file_proto_build_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -739,7 +747,7 @@ func (x *GetBuildRequest) String() string {
 func (*GetBuildRequest) ProtoMessage() {}
 
 func (x *GetBuildRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_build_proto_msgTypes[9]
+	mi := &file_proto_build_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -752,7 +760,7 @@ func (x *GetBuildRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetBuildRequest.ProtoReflect.Descriptor instead.
 func (*GetBuildRequest) Descriptor() ([]byte, []int) {
-	return file_build_proto_rawDescGZIP(), []int{9}
+	return file_proto_build_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *GetBuildRequest) GetBuildId() string {
@@ -780,7 +788,7 @@ type GetBuildResponse struct {
 
 func (x *GetBuildResponse) Reset() {
 	*x = GetBuildResponse{}
-	mi := &file_build_proto_msgTypes[10]
+	mi := &file_proto_build_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -792,7 +800,7 @@ func (x *GetBuildResponse) String() string {
 func (*GetBuildResponse) ProtoMessage() {}
 
 func (x *GetBuildResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_build_proto_msgTypes[10]
+	mi := &file_proto_build_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -805,7 +813,7 @@ func (x *GetBuildResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetBuildResponse.ProtoReflect.Descriptor instead.
 func (*GetBuildResponse) Descriptor() ([]byte, []int) {
-	return file_build_proto_rawDescGZIP(), []int{10}
+	return file_proto_build_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *GetBuildResponse) GetBuild() *Build {
@@ -841,7 +849,7 @@ type GetBuildLogsRequest struct {
 
 func (x *GetBuildLogsRequest) Reset() {
 	*x = GetBuildLogsRequest{}
-	mi := &file_build_proto_msgTypes[11]
+	mi := &file_proto_build_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -853,7 +861,7 @@ func (x *GetBuildLogsRequest) String() string {
 func (*GetBuildLogsRequest) ProtoMessage() {}
 
 func (x *GetBuildLogsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_build_proto_msgTypes[11]
+	mi := &file_proto_build_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -866,7 +874,7 @@ func (x *GetBuildLogsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetBuildLogsRequest.ProtoReflect.Descriptor instead.
 func (*GetBuildLogsRequest) Descriptor() ([]byte, []int) {
-	return file_build_proto_rawDescGZIP(), []int{11}
+	return file_proto_build_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *GetBuildLogsRequest) GetBuildId() string {
@@ -901,7 +909,7 @@ type GetBuildLogsResponse struct {
 
 func (x *GetBuildLogsResponse) Reset() {
 	*x = GetBuildLogsResponse{}
-	mi := &file_build_proto_msgTypes[12]
+	mi := &file_proto_build_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -913,7 +921,7 @@ func (x *GetBuildLogsResponse) String() string {
 func (*GetBuildLogsResponse) ProtoMessage() {}
 
 func (x *GetBuildLogsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_build_proto_msgTypes[12]
+	mi := &file_proto_build_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -926,7 +934,7 @@ func (x *GetBuildLogsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetBuildLogsResponse.ProtoReflect.Descriptor instead.
 func (*GetBuildLogsResponse) Descriptor() ([]byte, []int) {
-	return file_build_proto_rawDescGZIP(), []int{12}
+	return file_proto_build_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *GetBuildLogsResponse) GetLogs() []*BuildLog {
@@ -961,7 +969,7 @@ type AppendBuildLogsRequest struct {
 
 func (x *AppendBuildLogsRequest) Reset() {
 	*x = AppendBuildLogsRequest{}
-	mi := &file_build_proto_msgTypes[13]
+	mi := &file_proto_build_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -973,7 +981,7 @@ func (x *AppendBuildLogsRequest) String() string {
 func (*AppendBuildLogsRequest) ProtoMessage() {}
 
 func (x *AppendBuildLogsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_build_proto_msgTypes[13]
+	mi := &file_proto_build_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -986,7 +994,7 @@ func (x *AppendBuildLogsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AppendBuildLogsRequest.ProtoReflect.Descriptor instead.
 func (*AppendBuildLogsRequest) Descriptor() ([]byte, []int) {
-	return file_build_proto_rawDescGZIP(), []int{13}
+	return file_proto_build_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *AppendBuildLogsRequest) GetBuildId() string {
@@ -1013,7 +1021,7 @@ type AppendBuildLogsResponse struct {
 
 func (x *AppendBuildLogsResponse) Reset() {
 	*x = AppendBuildLogsResponse{}
-	mi := &file_build_proto_msgTypes[14]
+	mi := &file_proto_build_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1025,7 +1033,7 @@ func (x *AppendBuildLogsResponse) String() string {
 func (*AppendBuildLogsResponse) ProtoMessage() {}
 
 func (x *AppendBuildLogsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_build_proto_msgTypes[14]
+	mi := &file_proto_build_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1038,7 +1046,7 @@ func (x *AppendBuildLogsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AppendBuildLogsResponse.ProtoReflect.Descriptor instead.
 func (*AppendBuildLogsResponse) Descriptor() ([]byte, []int) {
-	return file_build_proto_rawDescGZIP(), []int{14}
+	return file_proto_build_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *AppendBuildLogsResponse) GetAcknowledged() bool {
@@ -1067,7 +1075,7 @@ type DeleteBuildLogsRequest struct {
 
 func (x *DeleteBuildLogsRequest) Reset() {
 	*x = DeleteBuildLogsRequest{}
-	mi := &file_build_proto_msgTypes[15]
+	mi := &file_proto_build_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1079,7 +1087,7 @@ func (x *DeleteBuildLogsRequest) String() string {
 func (*DeleteBuildLogsRequest) ProtoMessage() {}
 
 func (x *DeleteBuildLogsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_build_proto_msgTypes[15]
+	mi := &file_proto_build_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1092,7 +1100,7 @@ func (x *DeleteBuildLogsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteBuildLogsRequest.ProtoReflect.Descriptor instead.
 func (*DeleteBuildLogsRequest) Descriptor() ([]byte, []int) {
-	return file_build_proto_rawDescGZIP(), []int{15}
+	return file_proto_build_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *DeleteBuildLogsRequest) GetProjectId() string {
@@ -1127,7 +1135,7 @@ type DeleteBuildLogsResponse struct {
 
 func (x *DeleteBuildLogsResponse) Reset() {
 	*x = DeleteBuildLogsResponse{}
-	mi := &file_build_proto_msgTypes[16]
+	mi := &file_proto_build_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1139,7 +1147,7 @@ func (x *DeleteBuildLogsResponse) String() string {
 func (*DeleteBuildLogsResponse) ProtoMessage() {}
 
 func (x *DeleteBuildLogsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_build_proto_msgTypes[16]
+	mi := &file_proto_build_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1152,7 +1160,7 @@ func (x *DeleteBuildLogsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteBuildLogsResponse.ProtoReflect.Descriptor instead.
 func (*DeleteBuildLogsResponse) Descriptor() ([]byte, []int) {
-	return file_build_proto_rawDescGZIP(), []int{16}
+	return file_proto_build_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *DeleteBuildLogsResponse) GetBuildsAffected() int32 {
@@ -1176,11 +1184,11 @@ func (x *DeleteBuildLogsResponse) GetError() string {
 	return ""
 }
 
-var File_build_proto protoreflect.FileDescriptor
+var File_proto_build_proto protoreflect.FileDescriptor
 
-const file_build_proto_rawDesc = "" +
+const file_proto_build_proto_rawDesc = "" +
 	"\n" +
-	"\vbuild.proto\x12\x05build\x1a\x1fgoogle/protobuf/timestamp.proto\"\xef\x02\n" +
+	"\x11proto/build.proto\x12\x05build\x1a\x1fgoogle/protobuf/timestamp.proto\"\x8c\x03\n" +
 	"\x05Build\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
 	"\n" +
@@ -1195,7 +1203,8 @@ const file_build_proto_rawDesc = "" +
 	"\n" +
 	"created_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
 	"\n" +
-	"updated_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\"\x8c\x01\n" +
+	"updated_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x12\x1b\n" +
+	"\timage_tag\x18\t \x01(\tR\bimageTag\"\x8c\x01\n" +
 	"\tBuildStep\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x19\n" +
 	"\bbuild_id\x18\x02 \x01(\tR\abuildId\x12\x1b\n" +
@@ -1288,20 +1297,20 @@ const file_build_proto_rawDesc = "" +
 	"\x0fDeleteBuildLogs\x12\x1d.build.DeleteBuildLogsRequest\x1a\x1e.build.DeleteBuildLogsResponseB=Z;github.com/nexusdeploy/backend/services/build-service/protob\x06proto3"
 
 var (
-	file_build_proto_rawDescOnce sync.Once
-	file_build_proto_rawDescData []byte
+	file_proto_build_proto_rawDescOnce sync.Once
+	file_proto_build_proto_rawDescData []byte
 )
 
-func file_build_proto_rawDescGZIP() []byte {
-	file_build_proto_rawDescOnce.Do(func() {
-		file_build_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_build_proto_rawDesc), len(file_build_proto_rawDesc)))
+func file_proto_build_proto_rawDescGZIP() []byte {
+	file_proto_build_proto_rawDescOnce.Do(func() {
+		file_proto_build_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_proto_build_proto_rawDesc), len(file_proto_build_proto_rawDesc)))
 	})
-	return file_build_proto_rawDescData
+	return file_proto_build_proto_rawDescData
 }
 
-var file_build_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_build_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
-var file_build_proto_goTypes = []any{
+var file_proto_build_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_proto_build_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
+var file_proto_build_proto_goTypes = []any{
 	(BuildStatus)(0),                  // 0: build.BuildStatus
 	(*Build)(nil),                     // 1: build.Build
 	(*BuildStep)(nil),                 // 2: build.BuildStep
@@ -1322,7 +1331,7 @@ var file_build_proto_goTypes = []any{
 	(*DeleteBuildLogsResponse)(nil),   // 17: build.DeleteBuildLogsResponse
 	(*timestamppb.Timestamp)(nil),     // 18: google.protobuf.Timestamp
 }
-var file_build_proto_depIdxs = []int32{
+var file_proto_build_proto_depIdxs = []int32{
 	0,  // 0: build.Build.status:type_name -> build.BuildStatus
 	18, // 1: build.Build.started_at:type_name -> google.protobuf.Timestamp
 	18, // 2: build.Build.finished_at:type_name -> google.protobuf.Timestamp
@@ -1356,27 +1365,27 @@ var file_build_proto_depIdxs = []int32{
 	0,  // [0:12] is the sub-list for field type_name
 }
 
-func init() { file_build_proto_init() }
-func file_build_proto_init() {
-	if File_build_proto != nil {
+func init() { file_proto_build_proto_init() }
+func file_proto_build_proto_init() {
+	if File_proto_build_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_build_proto_rawDesc), len(file_build_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_build_proto_rawDesc), len(file_proto_build_proto_rawDesc)),
 			NumEnums:      1,
 			NumMessages:   17,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_build_proto_goTypes,
-		DependencyIndexes: file_build_proto_depIdxs,
-		EnumInfos:         file_build_proto_enumTypes,
-		MessageInfos:      file_build_proto_msgTypes,
+		GoTypes:           file_proto_build_proto_goTypes,
+		DependencyIndexes: file_proto_build_proto_depIdxs,
+		EnumInfos:         file_proto_build_proto_enumTypes,
+		MessageInfos:      file_proto_build_proto_msgTypes,
 	}.Build()
-	File_build_proto = out.File
-	file_build_proto_goTypes = nil
-	file_build_proto_depIdxs = nil
+	File_proto_build_proto = out.File
+	file_proto_build_proto_goTypes = nil
+	file_proto_build_proto_depIdxs = nil
 }

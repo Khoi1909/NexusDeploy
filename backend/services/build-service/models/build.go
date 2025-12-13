@@ -10,14 +10,14 @@ import (
 type BuildStatus string
 
 const (
-	BuildStatusPending      BuildStatus = "pending"
-	BuildStatusRunning      BuildStatus = "running"
-	BuildStatusFailed       BuildStatus = "failed"
+	BuildStatusPending       BuildStatus = "pending"
+	BuildStatusRunning       BuildStatus = "running"
+	BuildStatusFailed        BuildStatus = "failed"
 	BuildStatusBuildingImage BuildStatus = "building_image"
-	BuildStatusPushingImage BuildStatus = "pushing_image"
-	BuildStatusDeploying    BuildStatus = "deploying"
-	BuildStatusSuccess      BuildStatus = "success"
-	BuildStatusDeployFailed BuildStatus = "deploy_failed"
+	BuildStatusPushingImage  BuildStatus = "pushing_image"
+	BuildStatusDeploying     BuildStatus = "deploying"
+	BuildStatusSuccess       BuildStatus = "success"
+	BuildStatusDeployFailed  BuildStatus = "deploy_failed"
 )
 
 // Build represents a CI/CD build job (SRS B.3)
@@ -26,6 +26,7 @@ type Build struct {
 	ProjectID  uuid.UUID   `gorm:"type:uuid;not null;index"`
 	CommitSHA  string      `gorm:"type:varchar(40)"`
 	Status     BuildStatus `gorm:"type:varchar(50);not null;default:pending"`
+	ImageTag   string      `gorm:"type:varchar(255)"` // Docker image tag được tạo bởi Runner
 	StartedAt  *time.Time  `gorm:"type:timestamptz"`
 	FinishedAt *time.Time  `gorm:"type:timestamptz"`
 	CreatedAt  time.Time   `gorm:"not null;default:now()"`
@@ -54,11 +55,11 @@ func (b *Build) IsTerminal() bool {
 // CanTransitionTo checks if a status transition is valid
 func (b *Build) CanTransitionTo(newStatus BuildStatus) bool {
 	transitions := map[BuildStatus][]BuildStatus{
-		BuildStatusPending:      {BuildStatusRunning},
-		BuildStatusRunning:      {BuildStatusFailed, BuildStatusBuildingImage},
+		BuildStatusPending:       {BuildStatusRunning},
+		BuildStatusRunning:       {BuildStatusFailed, BuildStatusBuildingImage},
 		BuildStatusBuildingImage: {BuildStatusFailed, BuildStatusPushingImage},
-		BuildStatusPushingImage: {BuildStatusFailed, BuildStatusDeploying},
-		BuildStatusDeploying:    {BuildStatusSuccess, BuildStatusDeployFailed},
+		BuildStatusPushingImage:  {BuildStatusFailed, BuildStatusSuccess, BuildStatusDeploying},
+		BuildStatusDeploying:     {BuildStatusSuccess, BuildStatusDeployFailed},
 	}
 
 	allowed, ok := transitions[b.Status]
@@ -73,4 +74,3 @@ func (b *Build) CanTransitionTo(newStatus BuildStatus) bool {
 	}
 	return false
 }
-
