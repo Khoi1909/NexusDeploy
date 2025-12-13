@@ -1,193 +1,206 @@
-[![GitHub Workflow Status (branch)](https://img.shields.io/github/actions/workflow/status/golang-migrate/migrate/ci.yaml?branch=master)](https://github.com/golang-migrate/migrate/actions/workflows/ci.yaml?query=branch%3Amaster)
-[![GoDoc](https://pkg.go.dev/badge/github.com/golang-migrate/migrate)](https://pkg.go.dev/github.com/golang-migrate/migrate/v4)
-[![Coverage Status](https://img.shields.io/coveralls/github/golang-migrate/migrate/master.svg)](https://coveralls.io/github/golang-migrate/migrate?branch=master)
-[![packagecloud.io](https://img.shields.io/badge/deb-packagecloud.io-844fec.svg)](https://packagecloud.io/golang-migrate/migrate?filter=debs)
-[![Docker Pulls](https://img.shields.io/docker/pulls/migrate/migrate.svg)](https://hub.docker.com/r/migrate/migrate/)
-![Supported Go Versions](https://img.shields.io/badge/Go-1.20%2C%201.21-lightgrey.svg)
-[![GitHub Release](https://img.shields.io/github/release/golang-migrate/migrate.svg)](https://github.com/golang-migrate/migrate/releases)
-[![Go Report Card](https://goreportcard.com/badge/github.com/golang-migrate/migrate/v4)](https://goreportcard.com/report/github.com/golang-migrate/migrate/v4)
+<div align="center">
 
-# migrate
+# 🚀 NexusDeploy
 
-__Database migrations written in Go. Use as [CLI](#cli-usage) or import as [library](#use-in-your-go-project).__
+**Platform-as-a-Service (PaaS) with Automated CI/CD Pipeline**
 
-* Migrate reads migrations from [sources](#migration-sources)
-   and applies them in correct order to a [database](#databases).
-* Drivers are "dumb", migrate glues everything together and makes sure the logic is bulletproof.
-   (Keeps the drivers lightweight, too.)
-* Database drivers don't assume things or try to correct user input. When in doubt, fail.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8?logo=go)](https://golang.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-3178C6?logo=typescript)](https://www.typescriptlang.org/)
+[![Next.js](https://img.shields.io/badge/Next.js-14+-000000?logo=next.js)](https://nextjs.org/)
 
-Forked from [mattes/migrate](https://github.com/mattes/migrate)
+*Deploy your applications from GitHub to production in minutes*
 
-## Databases
+[Overview](#-overview) • [Features](#-key-features) • [Architecture](#-architecture) • [Tech Stack](#-technology-stack) • [Status](#-project-status)
 
-Database drivers run migrations. [Add a new database?](database/driver.go)
+</div>
 
-* [PostgreSQL](database/postgres)
-* [PGX v4](database/pgx)
-* [PGX v5](database/pgx/v5)
-* [Redshift](database/redshift)
-* [Ql](database/ql)
-* [Cassandra / ScyllaDB](database/cassandra)
-* [SQLite](database/sqlite)
-* [SQLite3](database/sqlite3) ([todo #165](https://github.com/mattes/migrate/issues/165))
-* [SQLCipher](database/sqlcipher)
-* [MySQL / MariaDB](database/mysql)
-* [Neo4j](database/neo4j)
-* [MongoDB](database/mongodb)
-* [CrateDB](database/crate) ([todo #170](https://github.com/mattes/migrate/issues/170))
-* [Shell](database/shell) ([todo #171](https://github.com/mattes/migrate/issues/171))
-* [Google Cloud Spanner](database/spanner)
-* [CockroachDB](database/cockroachdb)
-* [YugabyteDB](database/yugabytedb)
-* [ClickHouse](database/clickhouse)
-* [Firebird](database/firebird)
-* [MS SQL Server](database/sqlserver)
-* [RQLite](database/rqlite)
+---
 
-### Database URLs
+## 📖 Overview
 
-Database connection strings are specified via URLs. The URL format is driver dependent but generally has the form: `dbdriver://username:password@host:port/dbname?param1=true&param2=false`
+**NexusDeploy** is a modern Platform-as-a-Service solution designed to simplify web application deployment for developers. The platform automates the entire CI/CD pipeline from source code to production hosting, eliminating the complexity of setting up build environments, deployment infrastructure, and domain management.
 
-Any [reserved URL characters](https://en.wikipedia.org/wiki/Percent-encoding#Percent-encoding_reserved_characters) need to be escaped. Note, the `%` character also [needs to be escaped](https://en.wikipedia.org/wiki/Percent-encoding#Percent-encoding_the_percent_character)
+### What NexusDeploy Does
 
-Explicitly, the following characters need to be escaped:
-`!`, `#`, `$`, `%`, `&`, `'`, `(`, `)`, `*`, `+`, `,`, `/`, `:`, `;`, `=`, `?`, `@`, `[`, `]`
+✅ **Connects** your GitHub repositories to a fully managed hosting environment  
+✅ **Monitors** your code changes and automatically triggers builds and deployments  
+✅ **Builds** your applications in isolated Docker environments  
+✅ **Tests** your code automatically before deployment  
+✅ **Deploys** successful builds to production with zero manual configuration  
+✅ **Provides** public subdomains with SSL certificates automatically  
 
-It's easiest to always run the URL parts of your DB connection URL (e.g. username, password, etc) through an URL encoder. See the example Python snippets below:
+---
 
-```bash
-$ python3 -c 'import urllib.parse; print(urllib.parse.quote(input("String to encode: "), ""))'
-String to encode: FAKEpassword!#$%&'()*+,/:;=?@[]
-FAKEpassword%21%23%24%25%26%27%28%29%2A%2B%2C%2F%3A%3B%3D%3F%40%5B%5D
-$ python2 -c 'import urllib; print urllib.quote(raw_input("String to encode: "), "")'
-String to encode: FAKEpassword!#$%&'()*+,/:;=?@[]
-FAKEpassword%21%23%24%25%26%27%28%29%2A%2B%2C%2F%3A%3B%3D%3F%40%5B%5D
-$
-```
+## ✨ Key Features
 
-## Migration Sources
+### 🔄 Automated CI/CD Pipeline
 
-Source drivers read migrations from local or remote sources. [Add a new source?](source/driver.go)
+The platform monitors your connected GitHub repositories and automatically triggers builds and deployments whenever you push new code. Each project runs through a complete pipeline that includes building your application in an isolated Docker environment, running tests, and deploying successful builds to production.
 
-* [Filesystem](source/file) - read from filesystem
-* [io/fs](source/iofs) - read from a Go [io/fs](https://pkg.go.dev/io/fs#FS)
-* [Go-Bindata](source/go_bindata) - read from embedded binary data ([jteeuwen/go-bindata](https://github.com/jteeuwen/go-bindata))
-* [pkger](source/pkger) - read from embedded binary data ([markbates/pkger](https://github.com/markbates/pkger))
-* [GitHub](source/github) - read from remote GitHub repositories
-* [GitHub Enterprise](source/github_ee) - read from remote GitHub Enterprise repositories
-* [Bitbucket](source/bitbucket) - read from remote Bitbucket repositories
-* [Gitlab](source/gitlab) - read from remote Gitlab repositories
-* [AWS S3](source/aws_s3) - read from Amazon Web Services S3
-* [Google Cloud Storage](source/google_cloud_storage) - read from Google Cloud Platform Storage
+**Key Benefits:**
+- Zero-configuration setup
+- Isolated build environments
+- Automatic deployment on successful builds
+- Real-time build logs and status updates
 
-## CLI usage
+---
 
-* Simple wrapper around this library.
-* Handles ctrl+c (SIGINT) gracefully.
-* No config search paths, no config files, no magic ENV var injections.
+### 🔐 GitHub Integration
 
-__[CLI Documentation](cmd/migrate)__
+Authentication and repository management are handled seamlessly through GitHub OAuth. Users can securely connect their GitHub account and select which repositories they want to deploy. The platform manages webhooks and repository access automatically.
 
-### Basic usage
+**Features:**
+- Secure OAuth authentication
+- Repository selection and management
+- Automatic webhook configuration
+- Support for both public and private repositories
 
-```bash
-$ migrate -source file://path/to/migrations -database postgres://localhost:5432/database up 2
-```
+---
 
-### Docker usage
+### 🤖 Intelligent Error Analysis
 
-```bash
-$ docker run -v {{ migration dir }}:/migrations --network host migrate/migrate
-    -path=/migrations/ -database postgres://localhost:5432/database up 2
-```
+When builds or tests fail, NexusDeploy offers an AI-powered error analysis feature that examines failure logs and provides actionable suggestions for fixing issues. This helps developers quickly understand and resolve problems without spending time debugging.
 
-## Use in your Go project
+**Capabilities:**
+- Automatic log analysis
+- Actionable error suggestions
+- Context-aware recommendations
+- Quick problem resolution
 
-* API is stable and frozen for this release (v3 & v4).
-* Uses [Go modules](https://golang.org/cmd/go/#hdr-Modules__module_versions__and_more) to manage dependencies.
-* To help prevent database corruptions, it supports graceful stops via `GracefulStop chan bool`.
-* Bring your own logger.
-* Uses `io.Reader` streams internally for low memory overhead.
-* Thread-safe and no goroutine leaks.
+---
 
-__[Go Documentation](https://pkg.go.dev/github.com/golang-migrate/migrate/v4)__
+### 🌐 Automatic Hosting and Domain Management
 
-```go
-import (
-    "github.com/golang-migrate/migrate/v4"
-    _ "github.com/golang-migrate/migrate/v4/database/postgres"
-    _ "github.com/golang-migrate/migrate/v4/source/github"
-)
+Every successfully deployed application receives a public subdomain with valid SSL certificates. The platform handles all aspects of domain routing, SSL certificate provisioning, and container orchestration, so your applications are accessible via HTTPS immediately after deployment.
 
-func main() {
-    m, err := migrate.New(
-        "github://mattes:personal-access-token@mattes/migrate_test",
-        "postgres://localhost:5432/database?sslmode=enable")
-    m.Steps(2)
-}
-```
+**Included:**
+- Automatic subdomain assignment
+- SSL certificate provisioning
+- HTTPS enabled by default
+- Custom domain support (coming soon)
 
-Want to use an existing database client?
+---
 
-```go
-import (
-    "database/sql"
-    _ "github.com/lib/pq"
-    "github.com/golang-migrate/migrate/v4"
-    "github.com/golang-migrate/migrate/v4/database/postgres"
-    _ "github.com/golang-migrate/migrate/v4/source/file"
-)
+### 🔒 Environment Variables and Secrets Management
 
-func main() {
-    db, err := sql.Open("postgres", "postgres://localhost:5432/database?sslmode=enable")
-    driver, err := postgres.WithInstance(db, &postgres.Config{})
-    m, err := migrate.NewWithDatabaseInstance(
-        "file:///migrations",
-        "postgres", driver)
-    m.Up() // or m.Step(2) if you want to explicitly set the number of migrations to run
-}
-```
+The platform provides a secure way to manage environment variables and secrets for your applications. Sensitive information like API keys and database credentials are encrypted and stored securely, accessible only to your deployed containers.
 
-## Getting started
+**Security Features:**
+- Encrypted storage
+- Secure injection into containers
+- Granular access control
+- Audit logging
 
-Go to [getting started](GETTING_STARTED.md)
+---
 
-## Tutorials
+### 📊 Flexible Resource Management
 
-* [CockroachDB](database/cockroachdb/TUTORIAL.md)
-* [PostgreSQL](database/postgres/TUTORIAL.md)
+NexusDeploy offers different subscription plans with varying resource limits. Users can manage their projects within the constraints of their plan, with options to upgrade for higher limits on concurrent builds, maximum projects, and resource allocation.
 
-(more tutorials to come)
+**Plan Features:**
+- Free tier with basic limits
+- Standard plan for growing teams
+- Premium plan for production workloads
+- Easy plan upgrades and downgrades
 
-## Migration files
+---
 
-Each migration has an up and down migration. [Why?](FAQ.md#why-two-separate-files-up-and-down-for-a-migration)
+### 📈 Real-time Monitoring
 
-```bash
-1481574547_create_users_table.up.sql
-1481574547_create_users_table.down.sql
-```
+Build logs and deployment status are streamed in real-time through web interfaces. Users can monitor the progress of builds, view detailed logs, and track the status of their deployments from a centralized dashboard.
 
-[Best practices: How to write migrations.](MIGRATIONS.md)
+**Dashboard Features:**
+- Real-time build logs
+- Deployment status tracking
+- Project overview and statistics
+- Activity timeline
 
-## Coming from another db migration tool?
+---
 
-Check out [migradaptor](https://github.com/musinit/migradaptor/).
-*Note: migradaptor is not affliated or supported by this project*
+## 🏗️ Architecture
 
-## Versions
+NexusDeploy is built as a **microservices architecture** using Go, with each service handling a specific domain of functionality. Services communicate through gRPC for efficient inter-service communication. The frontend is built with Next.js, providing a modern and responsive user interface.
 
-Version | Supported? | Import | Notes
---------|------------|--------|------
-**master** | :white_check_mark: | `import "github.com/golang-migrate/migrate/v4"` | New features and bug fixes arrive here first |
-**v4** | :white_check_mark: | `import "github.com/golang-migrate/migrate/v4"` | Used for stable releases |
-**v3** | :x: | `import "github.com/golang-migrate/migrate"` (with package manager) or `import "gopkg.in/golang-migrate/migrate.v3"` (not recommended) | **DO NOT USE** - No longer supported |
+### System Components
 
-## Development and Contributing
+| Component | Description |
+|-----------|-------------|
+| **API Gateway** | Single entry point for all client requests, handles routing and authentication |
+| **Auth Service** | Manages user authentication, authorization, and plan management |
+| **Project Service** | Handles project CRUD operations and GitHub repository integration |
+| **Build Service** | Manages build lifecycle, status tracking, and build queuing |
+| **Deployment Service** | Handles application deployment, container orchestration, and lifecycle management |
+| **Runner Service** | Executes builds in isolated Docker environments |
+| **Notification Service** | Manages real-time notifications via WebSocket connections |
+| **AI Service** | Provides intelligent error analysis and suggestions |
 
-Yes, please! [`Makefile`](Makefile) is your friend,
-read the [development guide](CONTRIBUTING.md).
+### Infrastructure
 
-Also have a look at the [FAQ](FAQ.md).
+The platform leverages **Docker** for containerization, ensuring that each build and deployment runs in an isolated environment. A **reverse proxy** handles routing, SSL termination, and load balancing automatically.
 
+---
+
+## 🛠️ Technology Stack
+
+### Backend
+- **Language**: Go 1.21+
+- **Communication**: gRPC for inter-service communication
+- **Database**: PostgreSQL
+- **Message Queue**: Redis with Asynq
+- **Containerization**: Docker
+
+### Frontend
+- **Framework**: Next.js 14+ with App Router
+- **Language**: TypeScript
+- **Styling**: TailwindCSS
+- **State Management**: Zustand
+
+### Infrastructure
+- **Reverse Proxy**: Traefik
+- **Container Runtime**: Docker
+- **Authentication**: GitHub OAuth 2.0
+
+---
+
+## 📊 Project Status
+
+### ✅ Completed Features
+
+- User authentication via GitHub OAuth
+- Project management and GitHub repository integration
+- Automated CI/CD pipeline (build, test, deploy)
+- Real-time build logs and deployment status
+- Environment variables and secrets management
+- Resource limits based on subscription plans
+- Plan upgrade and downgrade functionality
+
+### 🚧 In Progress
+
+- AI-powered error analysis enhancements
+- Custom domain configuration
+- Advanced monitoring and analytics
+- Performance optimizations
+
+### 📋 Planned
+
+- Database-as-a-Service integration
+- Multi-region deployment support
+- Advanced caching strategies
+- Comprehensive documentation
+
+---
+
+## 📄 License
+
+This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) file for details.
+
+---
+
+<div align="center">
+
+**Built with ❤️ for developers who want to focus on code, not infrastructure**
+
+[Report Bug](https://github.com/Khoi1909/NexusDeploy/issues) • [Request Feature](https://github.com/Khoi1909/NexusDeploy/issues) • [View Documentation](./docs/)
+
+</div>
