@@ -6,7 +6,9 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/nexusdeploy/backend/pkg/config v0.0.0
 	github.com/nexusdeploy/backend/pkg/crypto v0.0.0
+	github.com/nexusdeploy/backend/pkg/grpc v0.0.0
 	github.com/nexusdeploy/backend/pkg/logger v0.0.0
+	github.com/nexusdeploy/backend/services/auth-service/proto v0.0.0
 	github.com/nexusdeploy/backend/services/project-service/proto v0.0.0
 	github.com/rs/zerolog v1.34.0
 	google.golang.org/grpc v1.67.0
@@ -16,6 +18,7 @@ require (
 )
 
 require (
+	github.com/grpc-ecosystem/go-grpc-middleware/v2 v2.0.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/pgx/v5 v5.6.0 // indirect
@@ -32,10 +35,11 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250804133106-a7a43d27e69b // indirect
 )
 
-replace github.com/nexusdeploy/backend/services/project-service/proto => ./proto
-
-replace github.com/nexusdeploy/backend/pkg/config => ../../pkg/config
-
-replace github.com/nexusdeploy/backend/pkg/crypto => ../../pkg/crypto
-
-replace github.com/nexusdeploy/backend/pkg/logger => ../../pkg/logger
+replace (
+	github.com/nexusdeploy/backend/pkg/config => ../../pkg/config
+	github.com/nexusdeploy/backend/pkg/crypto => ../../pkg/crypto
+	github.com/nexusdeploy/backend/pkg/grpc => ../../pkg/grpc
+	github.com/nexusdeploy/backend/pkg/logger => ../../pkg/logger
+	github.com/nexusdeploy/backend/services/auth-service/proto => ../auth-service/proto
+	github.com/nexusdeploy/backend/services/project-service/proto => ./proto
+)
