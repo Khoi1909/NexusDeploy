@@ -17,6 +17,9 @@ service AuthService {
   // Get user's plan (free, premium)
   rpc GetUserPlan (GetUserPlanRequest) returns (GetUserPlanResponse);
   
+  // Update user's plan (admin/internal use)
+  rpc UpdatePlan (UpdatePlanRequest) returns (UpdatePlanResponse);
+  
   // Check if user has permission for a resource
   rpc CheckPermission (CheckPermissionRequest) returns (CheckPermissionResponse);
   
@@ -84,6 +87,17 @@ message GetUserPlanResponse {
   int32  max_builds_per_month = 3;
   int32  rate_limit_per_window = 4; // Rate limit requests per window
   string error = 5;
+}
+
+// UpdatePlan
+message UpdatePlanRequest {
+  string user_id = 1;
+  string plan = 2; // "standard" | "premium"
+}
+
+message UpdatePlanResponse {
+  bool   success = 1;
+  string error = 2;
 }
 
 // CheckPermission

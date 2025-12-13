@@ -23,6 +23,7 @@ const (
 	AuthService_HandleOAuthCallback_FullMethodName = "/auth.AuthService/HandleOAuthCallback"
 	AuthService_ValidateToken_FullMethodName       = "/auth.AuthService/ValidateToken"
 	AuthService_GetUserPlan_FullMethodName         = "/auth.AuthService/GetUserPlan"
+	AuthService_UpdatePlan_FullMethodName          = "/auth.AuthService/UpdatePlan"
 	AuthService_CheckPermission_FullMethodName     = "/auth.AuthService/CheckPermission"
 	AuthService_GetUserInfo_FullMethodName         = "/auth.AuthService/GetUserInfo"
 	AuthService_RefreshToken_FullMethodName        = "/auth.AuthService/RefreshToken"
@@ -44,6 +45,8 @@ type AuthServiceClient interface {
 	ValidateToken(ctx context.Context, in *ValidateTokenRequest, opts ...grpc.CallOption) (*ValidateTokenResponse, error)
 	// Get user's plan (free, premium)
 	GetUserPlan(ctx context.Context, in *GetUserPlanRequest, opts ...grpc.CallOption) (*GetUserPlanResponse, error)
+	// Update user's plan (admin/internal use)
+	UpdatePlan(ctx context.Context, in *UpdatePlanRequest, opts ...grpc.CallOption) (*UpdatePlanResponse, error)
 	// Check if user has permission for a resource
 	CheckPermission(ctx context.Context, in *CheckPermissionRequest, opts ...grpc.CallOption) (*CheckPermissionResponse, error)
 	// Get user info by ID
@@ -98,6 +101,16 @@ func (c *authServiceClient) GetUserPlan(ctx context.Context, in *GetUserPlanRequ
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetUserPlanResponse)
 	err := c.cc.Invoke(ctx, AuthService_GetUserPlan_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *authServiceClient) UpdatePlan(ctx context.Context, in *UpdatePlanRequest, opts ...grpc.CallOption) (*UpdatePlanResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdatePlanResponse)
+	err := c.cc.Invoke(ctx, AuthService_UpdatePlan_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -168,6 +181,8 @@ type AuthServiceServer interface {
 	ValidateToken(context.Context, *ValidateTokenRequest) (*ValidateTokenResponse, error)
 	// Get user's plan (free, premium)
 	GetUserPlan(context.Context, *GetUserPlanRequest) (*GetUserPlanResponse, error)
+	// Update user's plan (admin/internal use)
+	UpdatePlan(context.Context, *UpdatePlanRequest) (*UpdatePlanResponse, error)
 	// Check if user has permission for a resource
 	CheckPermission(context.Context, *CheckPermissionRequest) (*CheckPermissionResponse, error)
 	// Get user info by ID
@@ -199,6 +214,9 @@ func (UnimplementedAuthServiceServer) ValidateToken(context.Context, *ValidateTo
 }
 func (UnimplementedAuthServiceServer) GetUserPlan(context.Context, *GetUserPlanRequest) (*GetUserPlanResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetUserPlan not implemented")
+}
+func (UnimplementedAuthServiceServer) UpdatePlan(context.Context, *UpdatePlanRequest) (*UpdatePlanResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdatePlan not implemented")
 }
 func (UnimplementedAuthServiceServer) CheckPermission(context.Context, *CheckPermissionRequest) (*CheckPermissionResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CheckPermission not implemented")
@@ -304,6 +322,24 @@ func _AuthService_GetUserPlan_Handler(srv interface{}, ctx context.Context, dec 
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AuthServiceServer).GetUserPlan(ctx, req.(*GetUserPlanRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AuthService_UpdatePlan_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdatePlanRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServiceServer).UpdatePlan(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthService_UpdatePlan_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServiceServer).UpdatePlan(ctx, req.(*UpdatePlanRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -420,6 +456,10 @@ var AuthService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetUserPlan",
 			Handler:    _AuthService_GetUserPlan_Handler,
+		},
+		{
+			MethodName: "UpdatePlan",
+			Handler:    _AuthService_UpdatePlan_Handler,
 		},
 		{
 			MethodName: "CheckPermission",
