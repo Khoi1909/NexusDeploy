@@ -9,6 +9,7 @@ RUN apk add --no-cache git protobuf
 # Copy go.mod and go.sum first for caching
 COPY services/build-service/go.mod services/build-service/go.sum* ./services/build-service/
 COPY services/build-service/proto/ ./services/build-service/proto/
+COPY services/auth-service/proto/ ./services/auth-service/proto/
 COPY pkg/ ./pkg/
 
 # Download dependencies
