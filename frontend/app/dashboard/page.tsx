@@ -21,6 +21,9 @@ import {
   Activity,
   Server,
   AlertTriangle,
+  Square,
+  Loader2,
+  Play,
 } from "lucide-react";
 
 type StatusType = "running" | "stopped" | "building" | "error" | "pending";
@@ -41,6 +44,9 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   // Store build and deployment status for each project
   const [projectStatuses, setProjectStatuses] = useState<Record<string, { build?: Build; deployment?: Deployment | null }>>({});
+  // Track stopping status for each project
+  const [stoppingProjects, setStoppingProjects] = useState<Record<string, boolean>>({});
+  const [startingProjects, setStartingProjects] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     // Wait for auth store to hydrate from localStorage
@@ -103,10 +109,14 @@ export default function DashboardPage() {
       return;
     }
 
+    let isMounted = true;
+
     const fetchProjectStatuses = async () => {
       try {
         const currentToken = useAuthStore.getState().accessToken;
-        if (!currentToken) return;
+        if (!currentToken || !isMounted) return;
+
+        console.log('Fetching project statuses for', projects.length, 'projects'); // Debug log
 
         const statusPromises = projects.map(async (project) => {
           try {
@@ -134,121 +144,44 @@ export default function DashboardPage() {
         });
 
         const results = await Promise.all(statusPromises);
-        const statusMap: Record<string, { build?: Build; deployment?: Deployment | null }> = {};
-        results.forEach((result) => {
-          statusMap[result.projectId] = {
-            build: result.build,
-            deployment: result.deployment,
-          };
+        if (!isMounted) return;
+
+        setProjectStatuses((prevStatuses) => {
+          const statusMap: Record<string, { build?: Build; deployment?: Deployment | null }> = { ...prevStatuses };
+          results.forEach((result) => {
+            statusMap[result.projectId] = {
+              build: result.build,
+              deployment: result.deployment,
+            };
+          });
+          return statusMap;
         });
-        setProjectStatuses(statusMap);
       } catch (err: any) {
         console.error("Failed to fetch project statuses:", err);
       }
     };
 
+    // Initial fetch
     fetchProjectStatuses();
 
-    // Poll if any project is building or pending
-    const needsPolling = projects.some((p) => {
-      const status = projectStatuses[p.id];
-      const projectStatus = (p as any).status as string;
-      return (
-        status?.build?.status === "running" ||
-        status?.build?.status === "building_image" ||
-        status?.build?.status === "pushing_image" ||
-        status?.build?.status === "deploying" ||
-        status?.build?.status === "pending" ||
-        projectStatus === "building" ||
-        projectStatus === "pending" ||
-        projectStatus === "pending_initial_build"
-      );
-    });
-
-    if (!needsPolling) {
-      return;
-    }
-
+    // Poll every 2 seconds for faster sync when builds are running
     const pollInterval = setInterval(() => {
-      fetchProjectStatuses();
-    }, 5000); // Poll every 5 seconds
+      if (isMounted) {
+        fetchProjectStatuses();
+      }
+    }, 2000);
 
     return () => {
+      isMounted = false;
       clearInterval(pollInterval);
     };
-  }, [accessToken, authLoading, isAuthenticated, isLoading, projects, projectStatuses]);
+  }, [accessToken, authLoading, isAuthenticated, isLoading, projects]);
 
   // Get actual project status based on build and deployment (sync with BuildStatusBadge)
   const getProjectStatusInfo = (project: any): { status: StatusType; label: string; className: string } => {
     const status = projectStatuses[project.id];
     
-    // Priority 1: Check build status (sync with BuildStatusBadge)
-    if (status?.build) {
-      const buildStatus = status.build.status;
-      switch (buildStatus) {
-        case "pending":
-          return {
-            status: "pending",
-            label: "Pending",
-            className: "bg-yellow-500/10 text-yellow-500",
-          };
-        case "running":
-          return {
-            status: "building",
-            label: "Running",
-            className: "bg-blue-500/10 text-blue-500",
-          };
-        case "building_image":
-          return {
-            status: "building",
-            label: "Building Image",
-            className: "bg-blue-500/10 text-blue-500",
-          };
-        case "pushing_image":
-          return {
-            status: "building",
-            label: "Pushing Image",
-            className: "bg-blue-500/10 text-blue-500",
-          };
-        case "deploying":
-          return {
-            status: "building",
-            label: "Deploying",
-            className: "bg-purple-500/10 text-purple-500",
-          };
-        case "success":
-          // If build succeeded, check deployment
-          if (status.deployment?.status === "running") {
-            return {
-              status: "running",
-              label: "Running",
-              className: "bg-accent-emerald/10 text-accent-emerald",
-            };
-          }
-          if (status.deployment?.status === "deploying") {
-            return {
-              status: "building",
-              label: "Deploying",
-              className: "bg-purple-500/10 text-purple-500",
-            };
-          }
-          // Build succeeded but not deployed
-          return {
-            status: "stopped",
-            label: "Stopped",
-            className: "bg-surface-800 text-surface-400",
-          };
-        case "failed":
-        case "deploy_failed":
-          return {
-            status: "error",
-            label: "Failed",
-            className: "bg-accent-rose/10 text-accent-rose",
-          };
-      }
-    }
-
-    // Priority 2: Check deployment status if no builds
+    // Priority 0: Check deployment status first (most accurate)
     if (status?.deployment) {
       if (status.deployment.status === "running") {
         return {
@@ -270,6 +203,57 @@ export default function DashboardPage() {
           label: "Stopped",
           className: "bg-surface-800 text-surface-400",
         };
+      }
+    }
+    
+    // Priority 1: Check build status (sync with BuildStatusBadge)
+    if (status?.build) {
+      const buildStatus = status.build.status;
+      switch (buildStatus) {
+        case "pending":
+          return {
+            status: "pending",
+            label: "Pending",
+            className: "bg-yellow-500/10 text-yellow-500",
+          };
+        case "running":
+          return {
+            status: "building",
+            label: "Building",
+            className: "bg-blue-500/10 text-blue-500",
+          };
+        case "building_image":
+          return {
+            status: "building",
+            label: "Building Image",
+            className: "bg-blue-500/10 text-blue-500",
+          };
+        case "pushing_image":
+          return {
+            status: "building",
+            label: "Pushing Image",
+            className: "bg-blue-500/10 text-blue-500",
+          };
+        case "deploying":
+          return {
+            status: "building",
+            label: "Deploying",
+            className: "bg-purple-500/10 text-purple-500",
+          };
+        case "success":
+          // Build succeeded but not deployed
+          return {
+            status: "stopped",
+            label: "Stopped",
+            className: "bg-surface-800 text-surface-400",
+          };
+        case "failed":
+        case "deploy_failed":
+          return {
+            status: "error",
+            label: "Failed",
+            className: "bg-accent-rose/10 text-accent-rose",
+          };
       }
     }
 
@@ -310,6 +294,120 @@ export default function DashboardPage() {
       status: mappedStatus,
       ...statusConfig[mappedStatus],
     };
+  };
+
+  // Handle stop deployment
+  const handleStop = async (projectId: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    if (!accessToken) {
+      setError("Not authenticated");
+      return;
+    }
+
+    if (!confirm("Are you sure you want to stop this deployment?")) {
+      return;
+    }
+
+    setStoppingProjects((prev) => ({ ...prev, [projectId]: true }));
+    setError(null);
+    
+    try {
+      await deploymentsApi.stopDeployment(accessToken, projectId);
+      // Refresh project statuses
+      const currentToken = useAuthStore.getState().accessToken;
+      if (currentToken) {
+        const statusPromises = projects.map(async (project) => {
+          if (project.id === projectId) {
+            try {
+              const deployment = await deploymentsApi.getDeploymentStatus(currentToken, project.id);
+              return { projectId: project.id, deployment };
+            } catch {
+              return { projectId: project.id, deployment: null };
+            }
+          }
+          return null;
+        });
+        const results = await Promise.all(statusPromises);
+        setProjectStatuses((prev) => {
+          const updated = { ...prev };
+          results.forEach((result) => {
+            if (result) {
+              updated[result.projectId] = {
+                ...updated[result.projectId],
+                deployment: result.deployment,
+              };
+            }
+          });
+          return updated;
+        });
+      }
+    } catch (err: any) {
+      console.error("Failed to stop deployment:", err);
+      setError(err.message || "Failed to stop deployment");
+    } finally {
+      setStoppingProjects((prev) => {
+        const updated = { ...prev };
+        delete updated[projectId];
+        return updated;
+      });
+    }
+  };
+
+  // Handle start deployment
+  const handleStart = async (projectId: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    if (!accessToken) {
+      setError("Not authenticated");
+      return;
+    }
+
+    setStartingProjects((prev) => ({ ...prev, [projectId]: true }));
+    setError(null);
+    
+    try {
+      await deploymentsApi.deploy(accessToken, projectId);
+      // Refresh project statuses
+      const currentToken = useAuthStore.getState().accessToken;
+      if (currentToken) {
+        const statusPromises = projects.map(async (project) => {
+          if (project.id === projectId) {
+            try {
+              const deployment = await deploymentsApi.getDeploymentStatus(currentToken, project.id);
+              return { projectId: project.id, deployment };
+            } catch {
+              return { projectId: project.id, deployment: null };
+            }
+          }
+          return null;
+        });
+        const results = await Promise.all(statusPromises);
+        setProjectStatuses((prev) => {
+          const updated = { ...prev };
+          results.forEach((result) => {
+            if (result) {
+              updated[result.projectId] = {
+                ...updated[result.projectId],
+                deployment: result.deployment,
+              };
+            }
+          });
+          return updated;
+        });
+      }
+    } catch (err: any) {
+      console.error("Failed to start deployment:", err);
+      setError(err.message || "Failed to start deployment");
+    } finally {
+      setStartingProjects((prev) => {
+        const updated = { ...prev };
+        delete updated[projectId];
+        return updated;
+      });
+    }
   };
 
   // Calculate stats based on actual project statuses
@@ -375,24 +473,24 @@ export default function DashboardPage() {
 
               <div className="rounded-xl border border-surface-800 bg-surface-900/50 p-4 backdrop-blur-sm">
                 <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent-emerald/10">
-                    <Activity className="h-5 w-5 text-accent-emerald" />
-                  </div>
-                  <div>
-                    <p className="text-2xl font-bold text-foreground">{stats.running}</p>
-                    <p className="text-xs text-surface-400">Running</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-surface-800 bg-surface-900/50 p-4 backdrop-blur-sm">
-                <div className="flex items-center gap-3">
                   <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent-amber/10">
                     <RefreshCw className="h-5 w-5 text-accent-amber" />
                   </div>
                   <div>
                     <p className="text-2xl font-bold text-foreground">{stats.building}</p>
                     <p className="text-xs text-surface-400">Building</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-surface-800 bg-surface-900/50 p-4 backdrop-blur-sm">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent-emerald/10">
+                    <Activity className="h-5 w-5 text-accent-emerald" />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold text-foreground">{stats.running}</p>
+                    <p className="text-xs text-surface-400">Running</p>
                   </div>
                 </div>
               </div>
@@ -453,46 +551,94 @@ export default function DashboardPage() {
                         projectStatuses[project.id]?.build?.status === "building_image" ||
                         projectStatuses[project.id]?.build?.status === "pushing_image" ||
                         projectStatuses[project.id]?.build?.status === "deploying");
+                    const deployment = projectStatuses[project.id]?.deployment;
+                    const build = projectStatuses[project.id]?.build;
+                    const isStopping = stoppingProjects[project.id] || false;
+                    const isStarting = startingProjects[project.id] || false;
+                    // Check if project has a successful build and is not currently running
+                    const hasSuccessfulBuild = build?.status === "success";
+                    const canStart = hasSuccessfulBuild && deployment?.status !== "running";
+                    const canStop = deployment?.status === "running";
                     return (
-                      <Link key={project.id} href={`/projects/${project.id}`}>
-                        <AnimatedCard status={statusInfo.status} className="h-full cursor-pointer">
-                          <div className="flex h-full flex-col">
-                            <div className="mb-4 flex items-start justify-between">
-                              <h3 className="text-lg font-semibold text-foreground">
-                                {project.name}
-                              </h3>
-                              <span
-                                className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-medium ${statusInfo.className}`}
-                              >
-                                {isAnimated && (
-                                  <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                                )}
-                                {statusInfo.label}
-                              </span>
-                            </div>
-
-                            <div className="flex-1 space-y-3">
-                              <div className="flex items-center gap-2 text-sm text-surface-400">
-                                <GitBranch className="h-4 w-4" />
-                                <span className="truncate">{project.branch || "main"}</span>
-                              </div>
-                              <div className="flex items-center gap-2 text-sm text-surface-400">
-                                <Clock className="h-4 w-4" />
-                                <span>
-                                  {new Date(project.updated_at).toLocaleDateString()}
+                      <div key={project.id} className="relative">
+                        <Link href={`/projects/${project.id}`}>
+                          <AnimatedCard status={statusInfo.status} className="h-full cursor-pointer">
+                            <div className="relative flex h-full flex-col">
+                              <div className="mb-4 flex items-center gap-3">
+                                <h3 className="text-lg font-semibold text-foreground">
+                                  {project.name}
+                                </h3>
+                                <span
+                                  className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-medium ${statusInfo.className}`}
+                                >
+                                  {isAnimated && (
+                                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                                  )}
+                                  {statusInfo.label}
                                 </span>
                               </div>
-                            </div>
 
-                            <div className="mt-4 flex items-center justify-between border-t border-surface-800 pt-4">
-                              <span className="rounded-md bg-surface-800 px-2 py-1 text-xs font-medium text-surface-300">
-                                {project.preset}
-                              </span>
-                              <ExternalLink className="h-4 w-4 text-surface-500 transition-colors group-hover:text-foreground" />
+                              <div className="flex-1 space-y-3">
+                                <div className="flex items-center gap-2 text-sm text-surface-400">
+                                  <GitBranch className="h-4 w-4" />
+                                  <span className="truncate">{project.branch || "main"}</span>
+                                </div>
+                                <div className="flex items-center gap-2 text-sm text-surface-400">
+                                  <Clock className="h-4 w-4" />
+                                  <span>
+                                    {new Date(project.updated_at).toLocaleDateString()}
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="mt-4 flex items-center justify-between border-t border-surface-800 pt-4">
+                                <span className="rounded-md bg-surface-800 px-2 py-1 text-xs font-medium text-surface-300">
+                                  {project.preset}
+                                </span>
+                                <ExternalLink className="h-4 w-4 text-surface-500 transition-colors group-hover:text-foreground" />
+                              </div>
+
+                              {/* Action buttons inside card */}
+                              {canStop && (
+                                <button
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    handleStop(project.id, e);
+                                  }}
+                                  disabled={isStopping}
+                                  className="absolute right-2 top-2 z-10 inline-flex items-center gap-2 rounded-lg border border-surface-700 bg-surface-900 px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-surface-800 disabled:opacity-50"
+                                >
+                                  {isStopping ? (
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                  ) : (
+                                    <Square className="h-3 w-3" />
+                                  )}
+                                  Stop
+                                </button>
+                              )}
+                              {canStart && (
+                                <button
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    handleStart(project.id, e);
+                                  }}
+                                  disabled={isStarting}
+                                  className="absolute right-2 top-2 z-10 inline-flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/20 disabled:opacity-50"
+                                >
+                                  {isStarting ? (
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                  ) : (
+                                    <Play className="h-3 w-3" />
+                                  )}
+                                  Start
+                                </button>
+                              )}
                             </div>
-                          </div>
-                        </AnimatedCard>
-                      </Link>
+                          </AnimatedCard>
+                        </Link>
+                      </div>
                     );
                   })}
                 </div>

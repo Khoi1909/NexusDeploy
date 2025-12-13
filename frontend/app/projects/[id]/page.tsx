@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { DotGrid } from "@/components/ui/DotGrid";
 import { Navbar } from "@/components/layout/Navbar";
@@ -30,6 +30,7 @@ import {
   CheckCircle,
   Loader2,
   XCircle,
+  Plus,
 } from "lucide-react";
 
 type TabType = "overview" | "builds" | "settings" | "secrets";
@@ -70,6 +71,7 @@ const statusConfig = {
 export default function ProjectDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const pathname = usePathname();
   const { accessToken, isLoading: authLoading } = useAuthStore();
   const projectId = params.id as string;
 
@@ -100,35 +102,77 @@ export default function ProjectDetailPage() {
   >("idle");
   const [currentBuildId, setCurrentBuildId] = useState<string | null>(null);
   const deployTriggeredRef = useRef<string | null>(null);
+  const previousProjectIdRef = useRef<string | null>(null);
+
+  // Secrets state
+  const [secrets, setSecrets] = useState<Array<{ id: string; name: string; created_at: string; updated_at: string }>>([]);
+  const [secretsLoading, setSecretsLoading] = useState(false);
+  const [newSecretName, setNewSecretName] = useState("");
+  const [newSecretValue, setNewSecretValue] = useState("");
+  const [isAddingSecret, setIsAddingSecret] = useState(false);
 
   useEffect(() => {
+    const currentProjectId = params.id as string;
+    
+    // Skip nếu projectId không thay đổi (tránh re-fetch không cần thiết)
+    if (currentProjectId === previousProjectIdRef.current && project) {
+      return;
+    }
+    
+    // Update ref
+    previousProjectIdRef.current = currentProjectId;
+    
+    // Reset state when projectId changes
+    setProject(null);
+    setError(null);
+    setIsLoading(true);
+    setDeployment(null);
+    setBuilds([]);
+    setBuildAndDeployStep("idle");
+    setCurrentBuildId(null);
+
     const fetchProject = async () => {
       // Wait for auth rehydration to complete
       if (authLoading) {
-        return;
+        return; // Wait for next render when authLoading is false
       }
-
-      if (!accessToken) {
+      
+      // After rehydration, check if we have access token
+      const currentToken = useAuthStore.getState().accessToken;
+      if (!currentToken) {
         setError("Not authenticated");
         setIsLoading(false);
         return;
       }
 
+      if (!currentProjectId) {
+        setIsLoading(false);
+        return;
+      }
+
       try {
-        setIsLoading(true);
         setError(null);
-        const data = await projectApi.getProject(accessToken, projectId);
-        setProject(data);
+        console.log('Fetching project:', currentProjectId); // Debug log
+        const data = await projectApi.getProject(currentToken, currentProjectId);
+        
+        // Verify we're still on same project
+        if (params.id === currentProjectId) {
+          setProject(data);
+        }
       } catch (err: any) {
         console.error("Failed to fetch project:", err);
-        setError(err.message || "Failed to fetch project");
+        if (params.id === currentProjectId) {
+          setError(err.message || "Failed to fetch project");
+        }
       } finally {
-        setIsLoading(false);
+        if (params.id === currentProjectId) {
+          setIsLoading(false);
+        }
       }
     };
 
     fetchProject();
-  }, [projectId, accessToken, authLoading]);
+  }, [params.id, accessToken, authLoading, project]);
 
   // Poll project status if project is building or pending
   useEffect(() => {
@@ -173,17 +217,27 @@ export default function ProjectDetailPage() {
   // Fetch deployment status
   useEffect(() => {
     const fetchDeployment = async () => {
+      // Wait for auth rehydration
+      if (authLoading) {
+        return;
+      }
+
       if (!accessToken || !project) return;
 
       try {
         setDeploymentLoading(true);
         const currentToken = useAuthStore.getState().accessToken;
-        if (!currentToken) return;
+        if (!currentToken) {
+          setDeploymentLoading(false);
+          return;
+        }
         
+        console.log('Fetching deployment status for project:', projectId); // Debug log
         const data = await deploymentsApi.getDeploymentStatus(
           currentToken,
           projectId
         );
+        console.log('Deployment status received:', data); // Debug log
         setDeployment(data);
       } catch (err: any) {
         // Deployment might not exist yet, that's okay
@@ -195,19 +249,20 @@ export default function ProjectDetailPage() {
       }
     };
 
-    if (project) {
+    if (project && !authLoading) {
       fetchDeployment();
     }
-  }, [projectId, accessToken, project]);
+  }, [projectId, accessToken, authLoading, project]);
 
-  // Poll deployment status when deploying or when build status is deploying
+  // Poll deployment status when deploying or when deployment is running (to keep status fresh)
   useEffect(() => {
-    // Check if we should poll (either buildAndDeployStep is deploying, or latest build is deploying)
+    // Check if we should poll
     const shouldPoll = 
       buildAndDeployStep === "deploying" || 
-      (builds.length > 0 && builds[0].status === "deploying");
+      (builds.length > 0 && builds[0].status === "deploying") ||
+      (deployment?.status === "running"); // Also poll when running to keep status fresh
 
-    if (!shouldPoll || !accessToken || !project) {
+    if (!shouldPoll || !accessToken || !project || authLoading) {
       return;
     }
 
@@ -225,8 +280,8 @@ export default function ProjectDetailPage() {
         );
         setDeployment(data);
         
-        // If deployment is running, stop polling
-        if (data?.status === "running") {
+        // If deployment is running and we were deploying, stop polling after success
+        if (data?.status === "running" && buildAndDeployStep === "deploying") {
           clearInterval(pollDeployment);
           setBuildAndDeployStep("success");
           // Refresh project status
@@ -240,10 +295,31 @@ export default function ProjectDetailPage() {
       } catch (err: any) {
         console.error("Failed to poll deployment:", err);
       }
-    }, 2000); // Poll every 2 seconds
+    }, 3000); // Poll every 3 seconds (less frequent when running)
 
     return () => clearInterval(pollDeployment);
-  }, [projectId, accessToken, project, buildAndDeployStep, builds]);
+  }, [projectId, accessToken, authLoading, project, buildAndDeployStep, builds, deployment]);
+
+  // Fetch secrets when secrets tab is active
+  useEffect(() => {
+    if (activeTab === "secrets" && accessToken && projectId) {
+      const fetchSecrets = async () => {
+        setSecretsLoading(true);
+        try {
+          const currentToken = useAuthStore.getState().accessToken;
+          if (!currentToken) return;
+          const secretsList = await projectApi.listSecrets(currentToken, projectId);
+          setSecrets(secretsList);
+        } catch (err: any) {
+          console.error("Failed to fetch secrets:", err);
+          setError(err.message || "Failed to fetch secrets");
+        } finally {
+          setSecretsLoading(false);
+        }
+      };
+      fetchSecrets();
+    }
+  }, [activeTab, accessToken, projectId]);
 
   // Fetch latest build for overview (always fetch first build)
   useEffect(() => {
@@ -254,28 +330,35 @@ export default function ProjectDetailPage() {
         const currentToken = useAuthStore.getState().accessToken;
         if (!currentToken) return;
         
-        const response = await buildsApi.listBuilds(currentToken, projectId, 1, 1);
+        console.log('Fetching latest build for project:', projectId); // Debug log
+        const response = await buildsApi.listBuilds(currentToken, projectId, 1, 10); // Fetch more to ensure we get the latest
+        console.log('Builds response:', response); // Debug log
+        
         if (response.builds && response.builds.length > 0) {
+          // Always update with the latest build (first one in the list)
+          const latestBuild = response.builds[0];
           setBuilds((prev) => {
-            // Only update if we don't have builds or if this is newer
-            if (prev.length === 0 || prev[0].id !== response.builds[0].id) {
-              return response.builds;
+            // Only update if we don't have builds or if this is newer/different
+            if (prev.length === 0 || prev[0].id !== latestBuild.id) {
+              return [latestBuild]; // Keep only the latest build for overview
             }
-            // Update status if build is still running
-            if (prev[0].id === response.builds[0].id) {
-              const updated = [...prev];
-              updated[0] = response.builds[0];
-              return updated;
+            // Update status if build is still running or status changed
+            if (prev[0].id === latestBuild.id && prev[0].status !== latestBuild.status) {
+              return [latestBuild];
             }
             return prev;
           });
+        } else {
+          // No builds found - clear builds state
+          console.log('No builds found for project:', projectId);
+          setBuilds([]);
         }
       } catch (err: any) {
         console.error("Failed to fetch latest build:", err);
       }
     };
 
-    if (project) {
+    if (project && !authLoading) {
       fetchLatestBuild();
       // Poll latest build status if it's still running
       const pollInterval = setInterval(() => {
@@ -284,22 +367,25 @@ export default function ProjectDetailPage() {
 
       return () => clearInterval(pollInterval);
     }
-  }, [projectId, accessToken, project]);
+  }, [projectId, accessToken, authLoading, project]);
 
   // Fetch builds when builds tab is active
   useEffect(() => {
     const fetchBuilds = async () => {
-      if (!accessToken || activeTab !== "builds") return;
+      if (!accessToken || activeTab !== "builds" || authLoading) return;
 
       try {
         setBuildsLoading(true);
         const currentToken = useAuthStore.getState().accessToken;
         if (!currentToken) return;
         
-        const response = await buildsApi.listBuilds(currentToken, projectId);
+        console.log('Fetching all builds for project:', projectId); // Debug log
+        const response = await buildsApi.listBuilds(currentToken, projectId, 1, 100); // Fetch more builds for builds tab
+        console.log('All builds response:', response); // Debug log
         setBuilds(response.builds || []);
       } catch (err: any) {
         console.error("Failed to fetch builds:", err);
+        setBuilds([]);
       } finally {
         setBuildsLoading(false);
       }
@@ -308,7 +394,7 @@ export default function ProjectDetailPage() {
     if (activeTab === "builds") {
       fetchBuilds();
     }
-  }, [projectId, accessToken, activeTab]);
+  }, [projectId, accessToken, authLoading, activeTab]);
 
   const handleDelete = async () => {
     if (!accessToken) {
@@ -335,6 +421,7 @@ export default function ProjectDetailPage() {
       return;
     }
 
+    setBuildAndDeployStep("deploying");
     setIsDeploying(true);
     setError(null);
     try {
@@ -343,21 +430,27 @@ export default function ProjectDetailPage() {
       // Refresh project status
       const updatedProject = await projectApi.getProject(accessToken, projectId);
       setProject(updatedProject);
+      
+      setBuildAndDeployStep("success");
+      // Reset to idle after 2 seconds
+      setTimeout(() => {
+        setBuildAndDeployStep("idle");
+      }, 2000);
     } catch (err: any) {
       console.error("Failed to deploy:", err);
       setError(err.message || "Failed to deploy");
+      setBuildAndDeployStep("failed");
     } finally {
       setIsDeploying(false);
     }
   };
 
-  const handleBuildAndDeploy = async () => {
+  const handleBuild = async () => {
     if (!accessToken) {
       setError("Not authenticated");
       return;
     }
 
-    deployTriggeredRef.current = null;
     setBuildAndDeployStep("building");
     setError(null);
     
@@ -413,38 +506,9 @@ export default function ProjectDetailPage() {
                 setError("Build failed. Please check build logs for details.");
                 setBuildAndDeployStep("failed");
               } else if (buildDetails.status === "success") {
-                // Step 3: Deploy after successful build
-                if (deployTriggeredRef.current === buildId) {
-                  return;
-                }
-                deployTriggeredRef.current = buildId;
-                setBuildAndDeployStep("deploying");
-                try {
-                  const currentToken = useAuthStore.getState().accessToken;
-                  if (!currentToken) {
-                    setError("Authentication expired. Please refresh the page.");
-                    setBuildAndDeployStep("failed");
-                    return;
-                  }
-                  const deployment = await deploymentsApi.deploy(currentToken, projectId);
-                  setDeployment(deployment);
-
-                  // Refresh project status
-                  const updatedProject = await projectApi.getProject(currentToken, projectId);
-                  setProject(updatedProject);
-
-                  setBuildAndDeployStep("success");
-                  setCurrentBuildId(null);
-
-                  // Reset to idle after 2 seconds
-                  setTimeout(() => {
-                    setBuildAndDeployStep("idle");
-                  }, 2000);
-                } catch (deployErr: any) {
-                  console.error("Failed to deploy:", deployErr);
-                  setError(deployErr.message || "Failed to deploy");
-                  setBuildAndDeployStep("failed");
-                }
+                // Build succeeded - stop polling, user can deploy manually
+                setBuildAndDeployStep("idle");
+                setCurrentBuildId(null);
               }
             } else if (attempts >= maxAttempts) {
               clearInterval(poll);
@@ -478,42 +542,6 @@ export default function ProjectDetailPage() {
     }
   };
 
-  // Fallback: if build becomes success but deploy not triggered (e.g., poll hiccup), trigger deploy once
-  useEffect(() => {
-    if (!project || !accessToken) return;
-    if (buildAndDeployStep !== "building" && buildAndDeployStep !== "deploying") return;
-
-    const targetBuild = currentBuildId
-      ? builds.find((b) => b.id === currentBuildId)
-      : builds[0];
-
-    if (!targetBuild || targetBuild.status !== "success") return;
-    if (deployTriggeredRef.current === targetBuild.id) return;
-
-    deployTriggeredRef.current = targetBuild.id;
-    (async () => {
-      setBuildAndDeployStep("deploying");
-      try {
-        const currentToken = useAuthStore.getState().accessToken;
-        if (!currentToken) {
-          setError("Authentication expired. Please refresh the page.");
-          setBuildAndDeployStep("failed");
-          return;
-        }
-        const deployment = await deploymentsApi.deploy(currentToken, projectId);
-        setDeployment(deployment);
-        const updatedProject = await projectApi.getProject(currentToken, projectId);
-        setProject(updatedProject);
-        setBuildAndDeployStep("success");
-        setCurrentBuildId(null);
-        setTimeout(() => setBuildAndDeployStep("idle"), 2000);
-      } catch (err: any) {
-        console.error("Fallback deploy failed:", err);
-        setError(err?.message || "Failed to deploy");
-        setBuildAndDeployStep("failed");
-      }
-    })();
-  }, [builds, currentBuildId, project, accessToken, buildAndDeployStep, projectId]);
 
   const handleStop = async () => {
     if (!accessToken) {
@@ -904,7 +932,7 @@ export default function ProjectDetailPage() {
                         <span
                           className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-medium ${statusInfo.bg} ${statusInfo.color}`}
                         >
-                          {(statusInfo.status === "running" ||
+                          {(statusInfo.status === "building" ||
                             statusInfo.status === "building_image" ||
                             statusInfo.status === "pushing_image" ||
                             statusInfo.status === "deploying") ? (
@@ -927,59 +955,6 @@ export default function ProjectDetailPage() {
                       </div>
                     </div>
 
-                    {/* Build & Deploy Progress Indicator */}
-                    {buildAndDeployStep !== "idle" && (
-                      <div className="mb-4 rounded-lg border border-surface-800 bg-surface-900/50 p-4">
-                        <div className="flex items-center gap-3">
-                          <div className="flex items-center gap-2">
-                            {buildAndDeployStep === "building" && (
-                              <>
-                                <Loader2 className="h-4 w-4 animate-spin text-accent-amber" />
-                                <span className="text-sm font-medium text-foreground">
-                                  Building...
-                                </span>
-                              </>
-                            )}
-                            {buildAndDeployStep === "deploying" && (
-                              <>
-                                <Loader2 className="h-4 w-4 animate-spin text-accent-emerald" />
-                                <span className="text-sm font-medium text-foreground">
-                                  Deploying...
-                                </span>
-                              </>
-                            )}
-                            {buildAndDeployStep === "success" && (
-                              <>
-                                <CheckCircle className="h-4 w-4 text-accent-emerald" />
-                                <span className="text-sm font-medium text-accent-emerald">
-                                  Successfully deployed!
-                                </span>
-                              </>
-                            )}
-                            {buildAndDeployStep === "failed" && (
-                              <>
-                                <AlertTriangle className="h-4 w-4 text-accent-rose" />
-                                <span className="text-sm font-medium text-accent-rose">
-                                  Build & Deploy failed
-                                </span>
-                              </>
-                            )}
-                          </div>
-                          {currentBuildId && (
-                            <button
-                              onClick={() => {
-                                setActiveTab("builds");
-                                setExpandedBuildId(currentBuildId);
-                              }}
-                              className="ml-auto text-xs text-surface-400 hover:text-foreground"
-                            >
-                              View logs →
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    )}
-
                     <div className="flex items-center gap-2">
                       {deployment?.status === "running" ? (
                         <button
@@ -995,50 +970,75 @@ export default function ProjectDetailPage() {
                           Stop
                         </button>
                       ) : (
-                        <button
-                          onClick={handleBuildAndDeploy}
-                          disabled={
-                            buildAndDeployStep !== "idle" ||
-                            deploymentLoading ||
-                            isDeploying
-                          }
-                          className="inline-flex items-center gap-2 rounded-lg bg-accent-emerald px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-emerald/90 disabled:opacity-50"
-                        >
-                          {buildAndDeployStep === "building" ? (
-                            <>
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                              Building...
-                            </>
-                          ) : buildAndDeployStep === "deploying" ? (
-                            <>
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                              Deploying...
-                            </>
-                          ) : buildAndDeployStep === "success" ? (
-                            <>
-                              <CheckCircle className="h-4 w-4" />
-                              Deployed
-                            </>
-                          ) : (
-                            <>
-                              <Play className="h-4 w-4" />
-                              Build & Deploy
-                            </>
+                        <>
+                          {/* Build button - only show if no builds yet (first build or after history clear) */}
+                          {builds.length === 0 && (
+                            <button
+                              onClick={handleBuild}
+                              disabled={
+                                buildAndDeployStep !== "idle" ||
+                                deploymentLoading
+                              }
+                              className="inline-flex items-center gap-2 rounded-lg bg-accent-emerald px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-emerald/90 disabled:opacity-50"
+                            >
+                              {buildAndDeployStep === "building" ? (
+                                <>
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                  Building...
+                                </>
+                              ) : (
+                                <>
+                                  <Play className="h-4 w-4" />
+                                  Build
+                                </>
+                              )}
+                            </button>
                           )}
+                          <button
+                            onClick={handleDeploy}
+                            disabled={
+                              buildAndDeployStep !== "idle" ||
+                              deploymentLoading ||
+                              isDeploying ||
+                              !builds.length ||
+                              builds[0]?.status !== "success"
+                            }
+                            className="inline-flex items-center gap-2 rounded-lg bg-purple-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {buildAndDeployStep === "deploying" ? (
+                              <>
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                                Deploying...
+                              </>
+                            ) : buildAndDeployStep === "success" ? (
+                              <>
+                                <CheckCircle className="h-4 w-4" />
+                                Deployed
+                              </>
+                            ) : (
+                              <>
+                                <Play className="h-4 w-4" />
+                                Deploy
+                              </>
+                            )}
+                          </button>
+                        </>
+                      )}
+                      {/* Rebuild button - only show if there are existing builds */}
+                      {builds.length > 0 && (
+                        <button
+                          onClick={handleRebuild}
+                          disabled={isRebuilding}
+                          className="inline-flex items-center gap-2 rounded-lg border border-surface-700 px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-surface-800 disabled:opacity-50"
+                        >
+                          {isRebuilding ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <RefreshCw className="h-4 w-4" />
+                          )}
+                          Rebuild
                         </button>
                       )}
-                      <button
-                        onClick={handleRebuild}
-                        disabled={isRebuilding}
-                        className="inline-flex items-center gap-2 rounded-lg border border-surface-700 px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-surface-800 disabled:opacity-50"
-                      >
-                        {isRebuilding ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <RefreshCw className="h-4 w-4" />
-                        )}
-                        Rebuild
-                      </button>
                       <a
                         href={project.repo_url}
                         target="_blank"
@@ -1296,6 +1296,9 @@ export default function ProjectDetailPage() {
                             {deployment.status === "stopped" && (
                               <Square className="h-3 w-3" />
                             )}
+                            {deployment.status === "failed" && (
+                              <XCircle className="h-3 w-3" />
+                            )}
                             {deployment.status === "deploying" ||
                             buildAndDeployStep === "deploying"
                               ? "Deploying..."
@@ -1303,10 +1306,13 @@ export default function ProjectDetailPage() {
                               ? "Running"
                               : deployment.status === "stopped"
                               ? "Stopped"
+                              : deployment.status === "failed"
+                              ? "Failed"
                               : deployment.status || "Unknown"}
                           </span>
                         </dd>
                       </div>
+                      {/* Show public_url if available, even if status is failed (container might still be running) */}
                       {deployment.public_url && (
                         <div>
                           <dt className="text-sm text-surface-400">Public URL</dt>
@@ -1315,10 +1321,14 @@ export default function ProjectDetailPage() {
                               href={deployment.public_url}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="text-accent-emerald hover:underline"
+                              className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                                deployment.status === "running"
+                                  ? "bg-accent-emerald/10 text-accent-emerald hover:bg-accent-emerald/20"
+                                  : "bg-surface-800 text-surface-300 hover:bg-surface-700"
+                              }`}
                             >
+                              <ExternalLink className="h-4 w-4" />
                               {deployment.public_url}
-                              <ExternalLink className="ml-1 inline h-3 w-3" />
                             </a>
                           </dd>
                         </div>
@@ -1329,6 +1339,22 @@ export default function ProjectDetailPage() {
                           <dd className="mt-1 font-mono text-xs text-foreground">
                             {deployment.container_id.substring(0, 12)}
                           </dd>
+                        </div>
+                      )}
+                      {deployment.id && (
+                        <div>
+                          <dt className="text-sm text-surface-400">Deployment ID</dt>
+                          <dd className="mt-1 font-mono text-xs text-foreground">
+                            {deployment.id.substring(0, 8)}...
+                          </dd>
+                        </div>
+                      )}
+                      {deployment.status === "failed" && (
+                        <div className="rounded-lg border border-accent-rose/20 bg-accent-rose/10 p-3 text-sm text-surface-300">
+                          <p className="font-medium text-accent-rose mb-1">Deployment Failed</p>
+                          <p className="text-xs">
+                            The deployment status shows as failed. However, if the container is still running, you can try accessing the public URL above.
+                          </p>
                         </div>
                       )}
                     </div>
@@ -1357,10 +1383,6 @@ export default function ProjectDetailPage() {
                     <div>
                       <dt className="text-sm text-surface-400">Preset</dt>
                       <dd className="mt-1 text-foreground capitalize">{project.preset}</dd>
-                    </div>
-                    <div>
-                      <dt className="text-sm text-surface-400">Port</dt>
-                      <dd className="mt-1 text-foreground">{project.port || 3000}</dd>
                     </div>
                   </dl>
                 </Card>
@@ -1403,7 +1425,7 @@ export default function ProjectDetailPage() {
                     ) : (
                       <Trash2 className="h-4 w-4" />
                     )}
-                    Clear Build History Logs
+                    Clear History
                   </button>
                 </div>
 
@@ -1488,13 +1510,117 @@ export default function ProjectDetailPage() {
                 <h3 className="mb-4 text-lg font-semibold text-foreground">
                   Environment Variables
                 </h3>
-                <div className="text-center py-12">
-                  <Key className="mx-auto mb-4 h-12 w-12 text-surface-600" />
-                  <p className="text-surface-400">No secrets configured</p>
-                  <p className="mt-1 text-sm text-surface-500">
-                    Add environment variables for your application
-                  </p>
+                
+                {/* Add Secret Form */}
+                <div className="mb-6 rounded-lg border border-surface-700 bg-surface-900/50 p-4">
+                  <h4 className="mb-3 text-sm font-medium text-foreground">Add New Secret</h4>
+                  <div className="space-y-3">
+                    <div>
+                      <label className="mb-1 block text-xs text-surface-400">Name</label>
+                      <input
+                        type="text"
+                        value={newSecretName}
+                        onChange={(e) => setNewSecretName(e.target.value)}
+                        placeholder="SECRET_KEY"
+                        className="w-full rounded-lg border border-surface-700 bg-surface-900 px-3 py-2 font-mono text-sm text-foreground placeholder:text-surface-500 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs text-surface-400">Value</label>
+                      <input
+                        type="password"
+                        value={newSecretValue}
+                        onChange={(e) => setNewSecretValue(e.target.value)}
+                        placeholder="secret_value"
+                        className="w-full rounded-lg border border-surface-700 bg-surface-900 px-3 py-2 font-mono text-sm text-foreground placeholder:text-surface-500 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                      />
+                    </div>
+                    <button
+                      onClick={async () => {
+                        if (!newSecretName || !newSecretValue || !accessToken) return;
+                        setIsAddingSecret(true);
+                        try {
+                          await projectApi.addSecret(accessToken, projectId, newSecretName, newSecretValue);
+                          setNewSecretName("");
+                          setNewSecretValue("");
+                          // Refresh secrets list
+                          const secretsList = await projectApi.listSecrets(accessToken, projectId);
+                          setSecrets(secretsList);
+                        } catch (err: any) {
+                          console.error("Failed to add secret:", err);
+                          setError(err.message || "Failed to add secret");
+                        } finally {
+                          setIsAddingSecret(false);
+                        }
+                      }}
+                      disabled={!newSecretName || !newSecretValue || isAddingSecret}
+                      className="w-full rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-primary-600 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {isAddingSecret ? (
+                        <>
+                          <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />
+                          Adding...
+                        </>
+                      ) : (
+                        <>
+                          <Plus className="mr-2 inline h-4 w-4" />
+                          Add Secret
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
+
+                {/* Secrets List */}
+                {secretsLoading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                  </div>
+                ) : secrets.length === 0 ? (
+                  <div className="text-center py-12">
+                    <Key className="mx-auto mb-4 h-12 w-12 text-surface-600" />
+                    <p className="text-surface-400">No secrets configured</p>
+                    <p className="mt-1 text-sm text-surface-500">
+                      Add environment variables for your application
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {secrets.map((secret) => (
+                      <div
+                        key={secret.id}
+                        className="flex items-center justify-between rounded-lg border border-surface-700 bg-surface-900/50 px-4 py-3"
+                      >
+                        <div className="flex-1">
+                          <p className="font-mono text-sm font-medium text-foreground">
+                            {secret.name}
+                          </p>
+                          <p className="mt-1 text-xs text-surface-500">
+                            Created: {new Date(secret.created_at).toLocaleDateString()}
+                          </p>
+                        </div>
+                        <button
+                          onClick={async () => {
+                            if (!confirm(`Are you sure you want to delete secret "${secret.name}"?`)) return;
+                            if (!accessToken) return;
+                            try {
+                              await projectApi.deleteSecret(accessToken, projectId, secret.id);
+                              // Refresh secrets list
+                              const secretsList = await projectApi.listSecrets(accessToken, projectId);
+                              setSecrets(secretsList);
+                            } catch (err: any) {
+                              console.error("Failed to delete secret:", err);
+                              setError(err.message || "Failed to delete secret");
+                            }
+                          }}
+                          className="rounded-lg p-2 text-surface-400 transition-colors hover:bg-surface-800 hover:text-accent-rose"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </Card>
             )}
               </>

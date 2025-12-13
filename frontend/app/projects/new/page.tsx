@@ -1,13 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { DotGrid } from "@/components/ui/DotGrid";
 import { Navbar } from "@/components/layout/Navbar";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Card } from "@/components/common/Card";
 import { useAuthStore } from "@/lib/store/authStore";
-import { projectApi, CreateProjectRequest } from "@/lib/api/projects";
+import { projectApi, CreateProjectRequest, Repository } from "@/lib/api/projects";
 import {
   ArrowLeft,
   GitBranch,
@@ -18,6 +18,7 @@ import {
   Trash2,
   Loader2,
   CheckCircle,
+  Search,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -36,6 +37,14 @@ export default function NewProjectPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Repository selection state
+  const [repositories, setRepositories] = useState<Repository[]>([]);
+  const [loadingRepos, setLoadingRepos] = useState(false);
+  const [selectedRepo, setSelectedRepo] = useState<Repository | null>(null);
+  const [repoSearchQuery, setRepoSearchQuery] = useState("");
+  const [showRepoDropdown, setShowRepoDropdown] = useState(false);
+  const repoDropdownRef = useRef<HTMLDivElement>(null);
+
   const [formData, setFormData] = useState({
     name: "",
     repo_url: "",
@@ -44,11 +53,71 @@ export default function NewProjectPage() {
     build_command: "npm run build",
     start_command: "npm start",
     env_vars: [{ key: "", value: "" }],
+    github_repo_id: 0,
+    is_private: false,
   });
+
+  // Fetch repositories on mount
+  useEffect(() => {
+    const fetchRepos = async () => {
+      if (!accessToken) return;
+
+      setLoadingRepos(true);
+      try {
+        const repos = await projectApi.listRepositories(accessToken);
+        setRepositories(repos);
+      } catch (err: any) {
+        console.error("Failed to load repositories:", err);
+        // Don't set error, allow manual URL input as fallback
+      } finally {
+        setLoadingRepos(false);
+      }
+    };
+
+    fetchRepos();
+  }, [accessToken]);
+
+  // Handle click outside to close dropdown
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (repoDropdownRef.current && !repoDropdownRef.current.contains(event.target as Node)) {
+        setShowRepoDropdown(false);
+      }
+    };
+
+    if (showRepoDropdown) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [showRepoDropdown]);
 
   const handleInputChange = (field: string, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
   };
+
+  // Handle repository selection
+  const handleRepoSelect = (repo: Repository) => {
+    setSelectedRepo(repo);
+    setFormData((prev) => ({
+      ...prev,
+      repo_url: repo.clone_url,
+      branch: repo.default_branch,
+      github_repo_id: repo.id,
+      is_private: repo.private || repo.is_private || false,
+    }));
+    setShowRepoDropdown(false);
+    setRepoSearchQuery("");
+  };
+
+  // Filter repositories based on search query
+  const filteredRepos = repositories.filter((repo) =>
+    repo.name.toLowerCase().includes(repoSearchQuery.toLowerCase()) ||
+    repo.full_name.toLowerCase().includes(repoSearchQuery.toLowerCase()) ||
+    (repo.description && repo.description.toLowerCase().includes(repoSearchQuery.toLowerCase()))
+  );
 
   const handleEnvVarChange = (index: number, field: "key" | "value", value: string) => {
     setFormData((prev) => {
@@ -89,6 +158,8 @@ export default function NewProjectPage() {
         preset: formData.preset,
         build_command: formData.build_command,
         start_command: formData.start_command,
+        github_repo_id: formData.github_repo_id || undefined,
+        is_private: formData.is_private,
       };
 
       await projectApi.createProject(accessToken, payload);
@@ -188,17 +259,127 @@ export default function NewProjectPage() {
 
                   <div>
                     <label className="mb-2 block text-sm font-medium text-foreground">
-                      GitHub Repository URL
+                      GitHub Repository
                     </label>
-                    <div className="relative">
-                      <GitBranch className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-surface-500" />
-                      <input
-                        type="text"
-                        value={formData.repo_url}
-                        onChange={(e) => handleInputChange("repo_url", e.target.value)}
-                        placeholder="https://github.com/username/repo"
-                        className="w-full rounded-lg border border-surface-700 bg-surface-900 py-3 pl-10 pr-4 text-foreground placeholder:text-surface-500 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-                      />
+                    <div className="relative" ref={repoDropdownRef}>
+                      {loadingRepos ? (
+                        <div className="flex items-center gap-3 rounded-lg border border-surface-700 bg-surface-900 py-3 px-4">
+                          <Loader2 className="h-5 w-5 animate-spin text-surface-400" />
+                          <span className="text-sm text-surface-400">Loading repositories...</span>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="relative">
+                            <GitBranch className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-surface-500 z-10" />
+                            <input
+                              type="text"
+                              value={selectedRepo ? selectedRepo.full_name : repoSearchQuery}
+                              onChange={(e) => {
+                                setRepoSearchQuery(e.target.value);
+                                setShowRepoDropdown(true);
+                                if (!e.target.value) {
+                                  setSelectedRepo(null);
+                                  handleInputChange("repo_url", "");
+                                  handleInputChange("branch", "main");
+                                }
+                              }}
+                              onFocus={() => setShowRepoDropdown(true)}
+                              placeholder="Search or select a repository..."
+                              className="w-full rounded-lg border border-surface-700 bg-surface-900 py-3 pl-10 pr-4 text-foreground placeholder:text-surface-500 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                            />
+                            {selectedRepo && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedRepo(null);
+                                  setRepoSearchQuery("");
+                                  handleInputChange("repo_url", "");
+                                  handleInputChange("branch", "main");
+                                }}
+                                className="absolute right-3 top-1/2 -translate-y-1/2 text-surface-400 hover:text-foreground"
+                              >
+                                ×
+                              </button>
+                            )}
+                          </div>
+
+                          {/* Dropdown */}
+                          {showRepoDropdown && (repoSearchQuery || !selectedRepo) && (
+                            <div className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-surface-700 bg-surface-900 shadow-xl">
+                              {filteredRepos.length === 0 ? (
+                                <div className="p-4 text-center text-sm text-surface-400">
+                                  {repositories.length === 0
+                                    ? "No repositories found"
+                                    : "No repositories match your search"}
+                                </div>
+                              ) : (
+                                <div className="py-2">
+                                  {filteredRepos.slice(0, 10).map((repo) => (
+                                    <button
+                                      key={repo.id}
+                                      type="button"
+                                      onClick={() => handleRepoSelect(repo)}
+                                      className="w-full px-4 py-3 text-left hover:bg-surface-800 transition-colors"
+                                    >
+                                      <div className="flex items-center justify-between">
+                                        <div className="flex-1 min-w-0">
+                                          <div className="flex items-center gap-2">
+                                            <span className="font-medium text-foreground truncate">
+                                              {repo.full_name}
+                                            </span>
+                                            {repo.private && (
+                                              <span className="text-xs text-surface-500">Private</span>
+                                            )}
+                                          </div>
+                                          {repo.description && (
+                                            <p className="mt-1 text-sm text-surface-400 truncate">
+                                              {repo.description}
+                                            </p>
+                                          )}
+                                          {repo.default_branch && (
+                                            <p className="mt-1 text-xs text-surface-500">
+                                              Branch: {repo.default_branch}
+                                            </p>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Manual URL input fallback */}
+                          {selectedRepo && (
+                            <div className="mt-2 text-xs text-surface-400">
+                              Selected: {selectedRepo.clone_url}
+                            </div>
+                          )}
+                          <div className="mt-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedRepo(null);
+                                setRepoSearchQuery("");
+                                setShowRepoDropdown(false);
+                              }}
+                              className="text-xs text-primary hover:underline"
+                            >
+                              Or enter repository URL manually
+                            </button>
+                          </div>
+                          {!selectedRepo && (
+                            <input
+                              type="text"
+                              value={formData.repo_url}
+                              onChange={(e) => handleInputChange("repo_url", e.target.value)}
+                              placeholder="https://github.com/username/repo"
+                              className="mt-2 w-full rounded-lg border border-surface-700 bg-surface-900 px-4 py-2 text-sm text-foreground placeholder:text-surface-500 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                            />
+                          )}
+                        </>
+                      )}
                     </div>
                   </div>
 
