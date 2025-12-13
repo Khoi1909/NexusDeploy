@@ -1,7 +1,7 @@
 import { apiClient } from "./client";
 import { Project } from "@/lib/store/projectStore";
 
-interface Repository {
+export interface Repository {
   id: number;
   name: string;
   full_name: string;
@@ -10,6 +10,7 @@ interface Repository {
   clone_url: string;
   default_branch: string;
   private: boolean;
+  is_private?: boolean; // Alias for private
 }
 
 export interface CreateProjectRequest {
@@ -19,7 +20,8 @@ export interface CreateProjectRequest {
   preset: string;
   build_command?: string;
   start_command?: string;
-  port?: number;
+  github_repo_id?: number;
+  is_private?: boolean;
 }
 
 interface Build {

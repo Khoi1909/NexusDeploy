@@ -6,7 +6,6 @@ import { cn } from "@/lib/utils/cn";
 import {
   LayoutDashboard,
   FolderKanban,
-  PlusCircle,
   Activity,
   Settings,
   HelpCircle,
@@ -21,7 +20,6 @@ interface SidebarLink {
 const mainLinks: SidebarLink[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/projects", label: "Projects", icon: FolderKanban },
-  { href: "/projects/new", label: "New Project", icon: PlusCircle },
   { href: "/activity", label: "Activity", icon: Activity },
 ];
 

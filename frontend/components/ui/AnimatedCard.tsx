@@ -55,11 +55,6 @@ export const AnimatedCard = forwardRef<HTMLDivElement, AnimatedCardProps>(
         )}
         {...props}
       >
-        {/* Status indicator */}
-        <div className="absolute top-4 right-4 flex items-center gap-2">
-          <div className={cn("h-2 w-2 rounded-full", config.indicator)} />
-        </div>
-
         {/* Gradient overlay on hover */}
         <div
           className={cn(
