@@ -21,6 +21,7 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	ProjectService_CreateProject_FullMethodName    = "/project.ProjectService/CreateProject"
 	ProjectService_GetProject_FullMethodName       = "/project.ProjectService/GetProject"
+	ProjectService_GetProjectByRepo_FullMethodName = "/project.ProjectService/GetProjectByRepo"
 	ProjectService_ListProjects_FullMethodName     = "/project.ProjectService/ListProjects"
 	ProjectService_UpdateProject_FullMethodName    = "/project.ProjectService/UpdateProject"
 	ProjectService_DeleteProject_FullMethodName    = "/project.ProjectService/DeleteProject"
@@ -43,6 +44,7 @@ type ProjectServiceClient interface {
 	// Project CRUD
 	CreateProject(ctx context.Context, in *CreateProjectRequest, opts ...grpc.CallOption) (*CreateProjectResponse, error)
 	GetProject(ctx context.Context, in *GetProjectRequest, opts ...grpc.CallOption) (*GetProjectResponse, error)
+	GetProjectByRepo(ctx context.Context, in *GetProjectByRepoRequest, opts ...grpc.CallOption) (*GetProjectResponse, error)
 	ListProjects(ctx context.Context, in *ListProjectsRequest, opts ...grpc.CallOption) (*ListProjectsResponse, error)
 	UpdateProject(ctx context.Context, in *UpdateProjectRequest, opts ...grpc.CallOption) (*UpdateProjectResponse, error)
 	DeleteProject(ctx context.Context, in *DeleteProjectRequest, opts ...grpc.CallOption) (*DeleteProjectResponse, error)
@@ -80,6 +82,16 @@ func (c *projectServiceClient) GetProject(ctx context.Context, in *GetProjectReq
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetProjectResponse)
 	err := c.cc.Invoke(ctx, ProjectService_GetProject_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *projectServiceClient) GetProjectByRepo(ctx context.Context, in *GetProjectByRepoRequest, opts ...grpc.CallOption) (*GetProjectResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetProjectResponse)
+	err := c.cc.Invoke(ctx, ProjectService_GetProjectByRepo_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -205,6 +217,7 @@ type ProjectServiceServer interface {
 	// Project CRUD
 	CreateProject(context.Context, *CreateProjectRequest) (*CreateProjectResponse, error)
 	GetProject(context.Context, *GetProjectRequest) (*GetProjectResponse, error)
+	GetProjectByRepo(context.Context, *GetProjectByRepoRequest) (*GetProjectResponse, error)
 	ListProjects(context.Context, *ListProjectsRequest) (*ListProjectsResponse, error)
 	UpdateProject(context.Context, *UpdateProjectRequest) (*UpdateProjectResponse, error)
 	DeleteProject(context.Context, *DeleteProjectRequest) (*DeleteProjectResponse, error)
@@ -233,6 +246,9 @@ func (UnimplementedProjectServiceServer) CreateProject(context.Context, *CreateP
 }
 func (UnimplementedProjectServiceServer) GetProject(context.Context, *GetProjectRequest) (*GetProjectResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetProject not implemented")
+}
+func (UnimplementedProjectServiceServer) GetProjectByRepo(context.Context, *GetProjectByRepoRequest) (*GetProjectResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetProjectByRepo not implemented")
 }
 func (UnimplementedProjectServiceServer) ListProjects(context.Context, *ListProjectsRequest) (*ListProjectsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListProjects not implemented")
@@ -320,6 +336,24 @@ func _ProjectService_GetProject_Handler(srv interface{}, ctx context.Context, de
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ProjectServiceServer).GetProject(ctx, req.(*GetProjectRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ProjectService_GetProjectByRepo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetProjectByRepoRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProjectServiceServer).GetProjectByRepo(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ProjectService_GetProjectByRepo_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProjectServiceServer).GetProjectByRepo(ctx, req.(*GetProjectByRepoRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -536,6 +570,10 @@ var ProjectService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetProject",
 			Handler:    _ProjectService_GetProject_Handler,
+		},
+		{
+			MethodName: "GetProjectByRepo",
+			Handler:    _ProjectService_GetProjectByRepo_Handler,
 		},
 		{
 			MethodName: "ListProjects",

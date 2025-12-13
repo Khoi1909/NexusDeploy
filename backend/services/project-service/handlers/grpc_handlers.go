@@ -2,16 +2,21 @@ package handlers
 
 import (
 	"context"
+	"fmt"
+	"math/rand"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	cfgpkg "github.com/nexusdeploy/backend/pkg/config"
 	"github.com/nexusdeploy/backend/pkg/crypto"
+	authpb "github.com/nexusdeploy/backend/services/auth-service/proto"
 	"github.com/nexusdeploy/backend/services/project-service/github"
 	"github.com/nexusdeploy/backend/services/project-service/models"
 	pb "github.com/nexusdeploy/backend/services/project-service/proto"
 	"github.com/rs/zerolog"
+	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"gorm.io/gorm"
 )
@@ -31,14 +36,18 @@ type ProjectServiceServer struct {
 	db           *gorm.DB
 	cfg          *cfgpkg.Config
 	githubClient *github.Client
+	authClient   authpb.AuthServiceClient
+	authConn     *grpc.ClientConn
 }
 
 // NewProjectServiceServer creates a new ProjectService server
-func NewProjectServiceServer(db *gorm.DB, cfg *cfgpkg.Config) *ProjectServiceServer {
+func NewProjectServiceServer(db *gorm.DB, cfg *cfgpkg.Config, authClient authpb.AuthServiceClient, authConn *grpc.ClientConn) *ProjectServiceServer {
 	return &ProjectServiceServer{
 		db:           db,
 		cfg:          cfg,
 		githubClient: github.NewClient(),
+		authClient:   authClient,
+		authConn:     authConn,
 	}
 }
 
@@ -64,6 +73,42 @@ func (s *ProjectServiceServer) CreateProject(ctx context.Context, req *pb.Create
 		return &pb.CreateProjectResponse{Error: "invalid user_id format"}, nil
 	}
 
+	// Check permission: enforce max_projects limit (FR7.4)
+	if s.authClient != nil {
+		planResp, err := s.authClient.GetUserPlan(ctx, &authpb.GetUserPlanRequest{
+			UserId: req.UserId,
+		})
+		if err != nil {
+			log.Error().Err(err).Str("user_id", req.UserId).Msg("Failed to get user plan for permission check")
+			return &pb.CreateProjectResponse{Error: "failed to check user plan"}, nil
+		}
+		if planResp.Error != "" {
+			log.Warn().Str("error", planResp.Error).Str("user_id", req.UserId).Msg("GetUserPlan returned error")
+			return &pb.CreateProjectResponse{Error: "failed to check user plan: " + planResp.Error}, nil
+		}
+
+		// Count existing projects for this user
+		var projectCount int64
+		if err := s.db.Model(&models.Project{}).Where("user_id = ?", userID).Count(&projectCount).Error; err != nil {
+			log.Error().Err(err).Str("user_id", req.UserId).Msg("Failed to count existing projects")
+			return &pb.CreateProjectResponse{Error: "failed to check project count"}, nil
+		}
+
+		// Check if user has reached the limit
+		maxProjects := planResp.MaxProjects
+		if maxProjects > 0 && projectCount >= int64(maxProjects) {
+			log.Warn().
+				Str("user_id", req.UserId).
+				Int64("current_count", projectCount).
+				Int32("max_projects", maxProjects).
+				Str("plan", planResp.Plan).
+				Msg("User reached max projects limit")
+			return &pb.CreateProjectResponse{
+				Error: fmt.Sprintf("You have reached the project limit for the %s plan (%d projects). Please upgrade your plan to create more projects.", planResp.Plan, maxProjects),
+			}, nil
+		}
+	}
+
 	// Set defaults
 	branch := req.Branch
 	if branch == "" {
@@ -71,7 +116,9 @@ func (s *ProjectServiceServer) CreateProject(ctx context.Context, req *pb.Create
 	}
 	port := req.Port
 	if port == 0 {
-		port = 8080
+		// Random port from 12000-12999 range
+		rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+		port = int32(12000 + rng.Intn(1000))
 	}
 
 	// Create project in database
@@ -162,6 +209,58 @@ func (s *ProjectServiceServer) GetProject(ctx context.Context, req *pb.GetProjec
 	return &pb.GetProjectResponse{
 		Project: projectToProto(&project),
 	}, nil
+}
+
+// GetProjectByRepo retrieves a project by repository URL or GitHub repo ID
+func (s *ProjectServiceServer) GetProjectByRepo(ctx context.Context, req *pb.GetProjectByRepoRequest) (*pb.GetProjectResponse, error) {
+	log.Info().
+		Str("repo_url", req.RepoUrl).
+		Int64("github_repo_id", req.GithubRepoId).
+		Msg("GetProjectByRepo called")
+
+	var project models.Project
+	var err error
+
+	// Prefer match by github_repo_id (exact match, faster)
+	if req.GithubRepoId != 0 {
+		if err = s.db.First(&project, "github_repo_id = ?", req.GithubRepoId).Error; err == nil {
+			return &pb.GetProjectResponse{
+				Project: projectToProto(&project),
+			}, nil
+		}
+		if err != gorm.ErrRecordNotFound {
+			log.Error().Err(err).Int64("github_repo_id", req.GithubRepoId).Msg("Failed to query project by github_repo_id")
+			return &pb.GetProjectResponse{Error: "failed to query project"}, nil
+		}
+	}
+
+	// Fallback to match by repo_url (normalize URLs for comparison)
+	if req.RepoUrl != "" {
+		// Normalize repo_url: remove .git suffix, convert to lowercase
+		normalizedURL := strings.ToLower(strings.TrimSuffix(req.RepoUrl, ".git"))
+
+		var projects []models.Project
+		if err = s.db.Find(&projects).Error; err != nil {
+			log.Error().Err(err).Msg("Failed to query projects")
+			return &pb.GetProjectResponse{Error: "failed to query projects"}, nil
+		}
+
+		// Match by normalized repo URL
+		for _, p := range projects {
+			projectURL := strings.ToLower(strings.TrimSuffix(p.RepoURL, ".git"))
+			if projectURL == normalizedURL {
+				return &pb.GetProjectResponse{
+					Project: projectToProto(&p),
+				}, nil
+			}
+		}
+	}
+
+	log.Warn().
+		Str("repo_url", req.RepoUrl).
+		Int64("github_repo_id", req.GithubRepoId).
+		Msg("Project not found by repo")
+	return &pb.GetProjectResponse{Error: "project not found"}, nil
 }
 
 // ListProjects lists all projects for a user
@@ -354,14 +453,35 @@ func (s *ProjectServiceServer) ListRepositories(ctx context.Context, req *pb.Lis
 	log.Info().Str("user_id", req.UserId).Msg("ListRepositories called")
 
 	if req.GithubAccessToken == "" {
+		log.Warn().Str("user_id", req.UserId).Msg("ListRepositories called with empty GitHub access token")
 		return &pb.ListRepositoriesResponse{Error: "github_access_token is required"}, nil
 	}
 
 	repos, err := s.githubClient.ListUserRepositories(ctx, req.GithubAccessToken)
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to list GitHub repositories")
-		return &pb.ListRepositoriesResponse{Error: "failed to list repositories: " + err.Error()}, nil
+		log.Error().
+			Err(err).
+			Str("user_id", req.UserId).
+			Msg("Failed to list GitHub repositories")
+
+		// Extract HTTP status code if available from error message
+		errorMsg := err.Error()
+		if strings.Contains(errorMsg, "GitHub API error:") {
+			// Error already contains status code from GitHub client
+			return &pb.ListRepositoriesResponse{
+				Error: "failed to list repositories: " + errorMsg,
+			}, nil
+		}
+
+		return &pb.ListRepositoriesResponse{
+			Error: "failed to list repositories: " + errorMsg,
+		}, nil
 	}
+
+	log.Info().
+		Str("user_id", req.UserId).
+		Int("repo_count", len(repos)).
+		Msg("Successfully listed GitHub repositories")
 
 	protoRepos := make([]*pb.Repository, len(repos))
 	for i, r := range repos {

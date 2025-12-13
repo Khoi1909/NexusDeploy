@@ -11,7 +11,9 @@ import (
 	"time"
 
 	cfgpkg "github.com/nexusdeploy/backend/pkg/config"
+	grpcpkg "github.com/nexusdeploy/backend/pkg/grpc"
 	"github.com/nexusdeploy/backend/pkg/logger"
+	authpb "github.com/nexusdeploy/backend/services/auth-service/proto"
 	"github.com/nexusdeploy/backend/services/project-service/handlers"
 	"github.com/nexusdeploy/backend/services/project-service/models"
 	pb "github.com/nexusdeploy/backend/services/project-service/proto"
@@ -60,12 +62,25 @@ func main() {
 	}
 	log.Info().Msg("Database migration completed")
 
-	// Create context with cancellation
+	// Connect to Auth Service for permission checks
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	authConn, err := grpcpkg.NewClient(ctx, grpcpkg.ClientConfig{
+		Address:     cfg.AuthServiceAddr,
+		Timeout:     5 * time.Second,
+		MaxRetries:  3,
+		ServiceName: "auth-service",
+	})
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to connect to Auth Service")
+	}
+	defer authConn.Close()
+	authClient := authpb.NewAuthServiceClient(authConn)
+	log.Info().Str("address", cfg.AuthServiceAddr).Msg("Connected to Auth Service")
+
 	// Start servers
-	go startGRPCServer(ctx)
+	go startGRPCServer(ctx, authClient, authConn)
 	go startHTTPServer(ctx)
 
 	// Wait for shutdown signal
@@ -83,7 +98,7 @@ func connectDB() (*gorm.DB, error) {
 	return gorm.Open(postgres.Open(dsn), &gorm.Config{})
 }
 
-func startGRPCServer(ctx context.Context) {
+func startGRPCServer(ctx context.Context, authClient authpb.AuthServiceClient, authConn *grpc.ClientConn) {
 	grpcAddr := fmt.Sprintf(":%d", 50052)
 	lis, err := net.Listen("tcp", grpcAddr)
 	if err != nil {
@@ -93,7 +108,7 @@ func startGRPCServer(ctx context.Context) {
 	grpcServer := grpc.NewServer()
 
 	// Register Project Service
-	projectServer := handlers.NewProjectServiceServer(db, cfg)
+	projectServer := handlers.NewProjectServiceServer(db, cfg, authClient, authConn)
 	pb.RegisterProjectServiceServer(grpcServer, projectServer)
 
 	// Register health check
