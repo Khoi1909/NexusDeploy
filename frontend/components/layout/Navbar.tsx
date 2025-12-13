@@ -27,13 +27,8 @@ export function Navbar() {
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="flex h-16 items-center justify-between">
           {/* Logo */}
-          <Link href={user ? "/dashboard" : "/"} className="flex items-center gap-3">
-            <img
-              src="/logo.png"
-              alt="NexusDeploy"
-              className="h-8 w-8 rounded-lg object-contain"
-            />
-            <span className="text-lg font-semibold text-foreground">NexusDeploy</span>
+          <Link href="/" className="flex items-center gap-3">
+            <span className="text-xl font-semibold text-foreground">NexusDeploy</span>
           </Link>
 
           {/* Desktop Navigation */}

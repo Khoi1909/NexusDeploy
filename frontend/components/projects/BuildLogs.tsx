@@ -295,7 +295,7 @@ export function BuildLogs({
                   className="flex items-start gap-2 text-surface-300"
                 >
                   <span className="shrink-0 text-surface-600">
-                    {new Date(log.timestamp).toLocaleTimeString("vi-VN", {
+                    {new Date(log.timestamp).toLocaleTimeString("en-US", {
                       hour: "2-digit",
                       minute: "2-digit",
                       second: "2-digit",
