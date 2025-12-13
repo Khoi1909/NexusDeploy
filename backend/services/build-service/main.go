@@ -11,7 +11,9 @@ import (
 	"time"
 
 	cfgpkg "github.com/nexusdeploy/backend/pkg/config"
+	grpcpkg "github.com/nexusdeploy/backend/pkg/grpc"
 	"github.com/nexusdeploy/backend/pkg/logger"
+	authpb "github.com/nexusdeploy/backend/services/auth-service/proto"
 	"github.com/nexusdeploy/backend/services/build-service/handlers"
 	"github.com/nexusdeploy/backend/services/build-service/models"
 	pb "github.com/nexusdeploy/backend/services/build-service/proto"
@@ -71,12 +73,25 @@ func main() {
 	defer producer.Close()
 	log.Info().Str("redis", redisAddr).Msg("Queue producer initialized")
 
-	// Create context with cancellation
+	// Connect to Auth Service for permission checks
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	authConn, err := grpcpkg.NewClient(ctx, grpcpkg.ClientConfig{
+		Address:     cfg.AuthServiceAddr,
+		Timeout:     5 * time.Second,
+		MaxRetries:  3,
+		ServiceName: "auth-service",
+	})
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to connect to Auth Service")
+	}
+	defer authConn.Close()
+	authClient := authpb.NewAuthServiceClient(authConn)
+	log.Info().Str("address", cfg.AuthServiceAddr).Msg("Connected to Auth Service")
+
 	// Start servers
-	go startGRPCServer(ctx, producer)
+	go startGRPCServer(ctx, producer, authClient, authConn)
 	go startHTTPServer(ctx)
 
 	// Wait for shutdown signal
@@ -94,7 +109,7 @@ func connectDB() (*gorm.DB, error) {
 	return gorm.Open(postgres.Open(dsn), &gorm.Config{})
 }
 
-func startGRPCServer(ctx context.Context, producer *queue.Producer) {
+func startGRPCServer(ctx context.Context, producer *queue.Producer, authClient authpb.AuthServiceClient, authConn *grpc.ClientConn) {
 	grpcAddr := ":50053"
 	lis, err := net.Listen("tcp", grpcAddr)
 	if err != nil {
@@ -104,7 +119,7 @@ func startGRPCServer(ctx context.Context, producer *queue.Producer) {
 	grpcServer := grpc.NewServer()
 
 	// Register Build Service
-	buildServer := handlers.NewBuildServiceServer(db, cfg, producer)
+	buildServer := handlers.NewBuildServiceServer(db, cfg, producer, authClient, authConn)
 	pb.RegisterBuildServiceServer(grpcServer, buildServer)
 
 	// Register health check
