@@ -9,19 +9,25 @@ import (
 	"os"
 
 	commonmw "github.com/nexusdeploy/backend/pkg/middleware"
-	pb "github.com/nexusdeploy/backend/services/auth-service/proto"
+	apimw "github.com/nexusdeploy/backend/services/api-gateway/middleware"
+	authpb "github.com/nexusdeploy/backend/services/auth-service/proto"
+	projectpb "github.com/nexusdeploy/backend/services/project-service/proto"
 	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc/metadata"
 )
 
 // AuthHandler xử lý các request liên quan đến authentication.
 type AuthHandler struct {
-	client pb.AuthServiceClient
+	client        authpb.AuthServiceClient
+	projectClient projectpb.ProjectServiceClient // For validation when changing plans
 }
 
 // NewAuthHandler tạo một AuthHandler mới.
-func NewAuthHandler(client pb.AuthServiceClient) *AuthHandler {
-	return &AuthHandler{client: client}
+func NewAuthHandler(client authpb.AuthServiceClient, projectClient projectpb.ProjectServiceClient) *AuthHandler {
+	return &AuthHandler{
+		client:        client,
+		projectClient: projectClient,
+	}
 }
 
 // LoginResponse là response trả về cho client sau khi login thành công.
@@ -48,7 +54,7 @@ func (h *AuthHandler) HandleGitHubLogin(w http.ResponseWriter, r *http.Request) 
 	// Truyền correlation ID vào gRPC metadata
 	ctx = metadata.AppendToOutgoingContext(ctx, "correlation-id", corrID)
 
-	resp, err := h.client.StartOAuthFlow(ctx, &pb.StartOAuthRequest{
+	resp, err := h.client.StartOAuthFlow(ctx, &authpb.StartOAuthRequest{
 		RedirectUrl: r.URL.Query().Get("redirect_url"),
 	})
 	if err != nil {
@@ -84,7 +90,7 @@ func (h *AuthHandler) HandleGitHubCallback(w http.ResponseWriter, r *http.Reques
 	// Truyền correlation ID vào gRPC metadata
 	ctx = metadata.AppendToOutgoingContext(ctx, "correlation-id", corrID)
 
-	resp, err := h.client.HandleOAuthCallback(ctx, &pb.HandleOAuthRequest{
+	resp, err := h.client.HandleOAuthCallback(ctx, &authpb.HandleOAuthRequest{
 		Code:  code,
 		State: state,
 	})
@@ -160,7 +166,7 @@ func (h *AuthHandler) HandleRefresh(w http.ResponseWriter, r *http.Request) {
 
 	ctx = metadata.AppendToOutgoingContext(ctx, "correlation-id", corrID)
 
-	resp, err := h.client.RefreshToken(ctx, &pb.RefreshTokenRequest{
+	resp, err := h.client.RefreshToken(ctx, &authpb.RefreshTokenRequest{
 		RefreshToken: req.RefreshToken,
 	})
 	if err != nil {
@@ -208,7 +214,7 @@ func (h *AuthHandler) HandleLogout(w http.ResponseWriter, r *http.Request) {
 
 	ctx = metadata.AppendToOutgoingContext(ctx, "correlation-id", corrID)
 
-	_, err = h.client.RevokeToken(ctx, &pb.RevokeTokenRequest{
+	_, err = h.client.RevokeToken(ctx, &authpb.RevokeTokenRequest{
 		AccessToken: token,
 	})
 	if err != nil {
@@ -217,6 +223,182 @@ func (h *AuthHandler) HandleLogout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// HandleGetUserInfo xử lý request lấy thông tin user hiện tại.
+// GET /api/user/info
+func (h *AuthHandler) HandleGetUserInfo(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	corrID := commonmw.GetCorrelationID(ctx)
+	userID := apimw.GetUserID(ctx)
+
+	if userID == "" {
+		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "unauthorized", Message: "user ID not found in context"})
+		return
+	}
+
+	ctx = metadata.AppendToOutgoingContext(ctx, "correlation-id", corrID)
+
+	resp, err := h.client.GetUserInfo(ctx, &authpb.GetUserInfoRequest{
+		UserId: userID,
+	})
+	if err != nil {
+		log.Error().Err(err).Str("correlation_id", corrID).Str("user_id", userID).Msg("GetUserInfo gRPC error")
+		writeJSON(w, http.StatusBadGateway, ErrorResponse{Error: "internal_error", Message: "failed to get user info"})
+		return
+	}
+
+	if resp.Error != "" {
+		log.Warn().Str("correlation_id", corrID).Str("error", resp.Error).Msg("GetUserInfo returned error")
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "user_error", Message: resp.Error})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"id":         resp.UserId,
+		"username":   resp.Username,
+		"email":      resp.Email,
+		"avatar_url": resp.AvatarUrl,
+		"plan":       resp.Plan,
+		"github_id":  resp.GithubId,
+	})
+}
+
+// HandleGetUserPlan xử lý request lấy thông tin plan của user hiện tại.
+// GET /api/user/plan
+func (h *AuthHandler) HandleGetUserPlan(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	corrID := commonmw.GetCorrelationID(ctx)
+	userID := apimw.GetUserID(ctx)
+
+	if userID == "" {
+		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "unauthorized", Message: "user ID not found in context"})
+		return
+	}
+
+	ctx = metadata.AppendToOutgoingContext(ctx, "correlation-id", corrID)
+
+	resp, err := h.client.GetUserPlan(ctx, &authpb.GetUserPlanRequest{
+		UserId: userID,
+	})
+	if err != nil {
+		log.Error().Err(err).Str("correlation_id", corrID).Str("user_id", userID).Msg("GetUserPlan gRPC error")
+		writeJSON(w, http.StatusBadGateway, ErrorResponse{Error: "internal_error", Message: "failed to get user plan"})
+		return
+	}
+
+	if resp.Error != "" {
+		log.Warn().Str("correlation_id", corrID).Str("error", resp.Error).Msg("GetUserPlan returned error")
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "plan_error", Message: resp.Error})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"plan":                  resp.Plan,
+		"max_projects":          resp.MaxProjects,
+		"max_builds_per_month":  resp.MaxBuildsPerMonth,
+		"rate_limit_per_window": resp.RateLimitPerWindow,
+	})
+}
+
+// HandleUpdatePlan xử lý request cập nhật plan của user.
+// PUT /api/user/plan
+func (h *AuthHandler) HandleUpdatePlan(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	corrID := commonmw.GetCorrelationID(ctx)
+	userID := apimw.GetUserID(ctx)
+
+	if userID == "" {
+		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "unauthorized", Message: "user ID not found in context"})
+		return
+	}
+
+	// Parse request body
+	var reqBody struct {
+		Plan string `json:"plan"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "invalid_request", Message: "invalid JSON body"})
+		return
+	}
+
+	if reqBody.Plan != "standard" && reqBody.Plan != "premium" {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "invalid_plan", Message: "plan must be 'standard' or 'premium'"})
+		return
+	}
+
+	ctx = metadata.AppendToOutgoingContext(ctx, "correlation-id", corrID)
+
+	// Step 1: Get current plan for validation
+	currentPlanResp, err := h.client.GetUserPlan(ctx, &authpb.GetUserPlanRequest{
+		UserId: userID,
+	})
+	if err != nil {
+		log.Error().Err(err).Str("correlation_id", corrID).Str("user_id", userID).Msg("GetUserPlan gRPC error")
+		writeJSON(w, http.StatusBadGateway, ErrorResponse{Error: "internal_error", Message: "failed to get current plan"})
+		return
+	}
+	if currentPlanResp.Error != "" {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "plan_error", Message: currentPlanResp.Error})
+		return
+	}
+
+	currentPlan := currentPlanResp.Plan
+	newPlan := reqBody.Plan
+
+	// Step 2: Validate downgrade - check if user exceeds new plan limits (FR7.6.3)
+	if currentPlan == "premium" && newPlan == "standard" {
+		// Standard plan limits: 3 projects max
+		maxProjects := int32(3)
+
+		// Count user's current projects
+		if h.projectClient != nil {
+			projectsResp, err := h.projectClient.ListProjects(ctx, &projectpb.ListProjectsRequest{
+				UserId: userID,
+			})
+			if err == nil && projectsResp.Error == "" {
+				currentProjectCount := int32(len(projectsResp.Projects))
+				if currentProjectCount > maxProjects {
+					writeJSON(w, http.StatusBadRequest, ErrorResponse{
+						Error:   "downgrade_not_allowed",
+						Message: fmt.Sprintf("Cannot downgrade: you currently have %d projects, but the %s plan only allows a maximum of %d projects. Please delete some projects before downgrading.", currentProjectCount, newPlan, maxProjects),
+					})
+					return
+				}
+			} else if err != nil {
+				log.Warn().Err(err).Str("correlation_id", corrID).Msg("Failed to validate project count for downgrade, proceeding anyway")
+			}
+		}
+	}
+
+	// Step 3: Update plan
+	updateResp, err := h.client.UpdatePlan(ctx, &authpb.UpdatePlanRequest{
+		UserId: userID,
+		Plan:   newPlan,
+	})
+	if err != nil {
+		log.Error().Err(err).Str("correlation_id", corrID).Str("user_id", userID).Msg("UpdatePlan gRPC error")
+		writeJSON(w, http.StatusBadGateway, ErrorResponse{Error: "internal_error", Message: "failed to update plan"})
+		return
+	}
+
+	if !updateResp.Success {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "update_failed", Message: updateResp.Error})
+		return
+	}
+
+	log.Info().
+		Str("correlation_id", corrID).
+		Str("user_id", userID).
+		Str("old_plan", currentPlan).
+		Str("new_plan", newPlan).
+		Msg("Plan updated successfully")
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": fmt.Sprintf("Plan đã được cập nhật từ %s sang %s", currentPlan, newPlan),
+		"plan":    newPlan,
+	})
 }
 
 // writeJSON helper để write JSON response.

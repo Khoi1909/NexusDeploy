@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"time"
 
 	cfgpkg "github.com/nexusdeploy/backend/pkg/config"
@@ -88,10 +90,10 @@ func main() {
 	deploymentClient := deploymentpb.NewDeploymentServiceClient(deploymentConn)
 
 	// Handlers
-	authHandler := handlers.NewAuthHandler(authClient)
+	authHandler := handlers.NewAuthHandler(authClient, projectClient)
 	projectHandler := handlers.NewProjectHandler(projectClient)
 	buildHandler := handlers.NewBuildHandler(buildClient)
-	deploymentHandler := handlers.NewDeploymentHandler(deploymentClient, buildClient, projectClient)
+	deploymentHandler := handlers.NewDeploymentHandler(deploymentClient, buildClient, projectClient, authClient)
 
 	// Wire GetGitHubToken callback - Gateway fetches token from Auth Service
 	// and passes to Project Service (frontend never sees the token)
@@ -111,13 +113,126 @@ func main() {
 	webhookHandler := handlers.NewWebhookHandler(cfg.GitHubWebhookSecret, handlers.WebhookProcessorFunc(func(r *http.Request, event handlers.WebhookEvent) error {
 		// Trigger build when receiving push event from GitHub
 		if event.Event == "push" {
+			corrID := commonmw.GetCorrelationID(r.Context())
 			log.Info().
-				Str(commonmw.CorrelationIDKey, commonmw.GetCorrelationID(r.Context())).
+				Str(commonmw.CorrelationIDKey, corrID).
 				Str("event", event.Event).
 				Str("delivery_id", event.DeliveryID).
-				Msg("Triggering build from GitHub webhook")
-			// Note: In production, extract project_id from webhook payload
-			// and call buildClient.TriggerBuild()
+				Msg("Processing push event from GitHub webhook")
+
+			// Parse webhook payload
+			var payload struct {
+				Repository struct {
+					ID       int64  `json:"id"`
+					FullName string `json:"full_name"`
+					CloneURL string `json:"clone_url"`
+				} `json:"repository"`
+				HeadCommit struct {
+					ID string `json:"id"`
+				} `json:"head_commit"`
+				Ref string `json:"ref"` // "refs/heads/branch-name"
+			}
+
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				log.Error().
+					Err(err).
+					Str(commonmw.CorrelationIDKey, corrID).
+					Str("delivery_id", event.DeliveryID).
+					Msg("Failed to parse webhook payload")
+				return nil // Don't fail webhook, just log error
+			}
+
+			// Extract branch from ref (e.g., "refs/heads/main" -> "main")
+			branch := strings.TrimPrefix(payload.Ref, "refs/heads/")
+			if branch == payload.Ref {
+				// If ref doesn't start with refs/heads/, try refs/tags/ or just use as-is
+				branch = strings.TrimPrefix(payload.Ref, "refs/tags/")
+			}
+
+			// Find project by repository
+			ctx := r.Context()
+			projectResp, err := projectClient.GetProjectByRepo(ctx, &projectpb.GetProjectByRepoRequest{
+				RepoUrl:      payload.Repository.CloneURL,
+				GithubRepoId: payload.Repository.ID,
+			})
+			if err != nil {
+				log.Error().
+					Err(err).
+					Str(commonmw.CorrelationIDKey, corrID).
+					Str("delivery_id", event.DeliveryID).
+					Str("repo_full_name", payload.Repository.FullName).
+					Int64("github_repo_id", payload.Repository.ID).
+					Msg("Failed to find project by repository")
+				return nil // Don't fail webhook
+			}
+
+			if projectResp.Error != "" || projectResp.Project == nil {
+				log.Warn().
+					Str(commonmw.CorrelationIDKey, corrID).
+					Str("delivery_id", event.DeliveryID).
+					Str("repo_full_name", payload.Repository.FullName).
+					Str("error", projectResp.Error).
+					Msg("Project not found for repository")
+				return nil // Don't fail webhook
+			}
+
+			// Check if branch matches project's configured branch
+			if projectResp.Project.Branch != "" && projectResp.Project.Branch != branch {
+				log.Info().
+					Str(commonmw.CorrelationIDKey, corrID).
+					Str("delivery_id", event.DeliveryID).
+					Str("project_id", projectResp.Project.Id).
+					Str("project_branch", projectResp.Project.Branch).
+					Str("push_branch", branch).
+					Msg("Branch mismatch, skipping build trigger")
+				return nil
+			}
+
+			// Trigger build
+			if payload.HeadCommit.ID == "" {
+				log.Warn().
+					Str(commonmw.CorrelationIDKey, corrID).
+					Str("delivery_id", event.DeliveryID).
+					Str("project_id", projectResp.Project.Id).
+					Msg("No head_commit found in payload, skipping build trigger")
+				return nil
+			}
+
+			buildResp, err := buildClient.TriggerBuild(ctx, &buildpb.TriggerBuildRequest{
+				ProjectId: projectResp.Project.Id,
+				CommitSha: payload.HeadCommit.ID,
+				Branch:    branch,
+				RepoUrl:   payload.Repository.CloneURL,
+			})
+			if err != nil {
+				log.Error().
+					Err(err).
+					Str(commonmw.CorrelationIDKey, corrID).
+					Str("delivery_id", event.DeliveryID).
+					Str("project_id", projectResp.Project.Id).
+					Str("commit_sha", payload.HeadCommit.ID).
+					Msg("Failed to trigger build from webhook")
+				return nil // Don't fail webhook, GitHub will retry if we return error
+			}
+
+			if buildResp.Error != "" {
+				log.Error().
+					Str(commonmw.CorrelationIDKey, corrID).
+					Str("delivery_id", event.DeliveryID).
+					Str("project_id", projectResp.Project.Id).
+					Str("error", buildResp.Error).
+					Msg("Build Service returned error when triggering build")
+				return nil
+			}
+
+			log.Info().
+				Str(commonmw.CorrelationIDKey, corrID).
+				Str("delivery_id", event.DeliveryID).
+				Str("project_id", projectResp.Project.Id).
+				Str("build_id", buildResp.Build.Id).
+				Str("commit_sha", payload.HeadCommit.ID).
+				Str("branch", branch).
+				Msg("Successfully triggered build from webhook")
 		}
 		return nil
 	}))

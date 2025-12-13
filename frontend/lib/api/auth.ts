@@ -49,5 +49,10 @@ export const authApi = {
   logout: async (token: string): Promise<void> => {
     return apiClient.post("/auth/logout", {}, { token });
   },
+
+  // Update plan
+  updatePlan: async (token: string, plan: "standard" | "premium"): Promise<{ success: boolean; message: string; plan: string }> => {
+    return apiClient.put("/api/user/plan", { plan }, { token });
+  },
 };
 

@@ -1,6 +1,7 @@
 package routes
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
@@ -79,6 +80,29 @@ func NewRouter(cfg RouterConfig) http.Handler {
 		mux.HandleFunc("/auth/github/callback", cfg.AuthHandler.HandleGitHubCallback)
 		mux.HandleFunc("/auth/refresh", cfg.AuthHandler.HandleRefresh)
 		mux.HandleFunc("/auth/logout", cfg.AuthHandler.HandleLogout)
+	}
+
+	// Protected user routes
+	if cfg.AuthHandler != nil && cfg.AuthClient != nil {
+		authMW := apimw.AuthMiddleware(cfg.AuthClient)
+		mux.Handle("/api/user/info", chain(
+			http.HandlerFunc(cfg.AuthHandler.HandleGetUserInfo),
+			authMW,
+		))
+		mux.Handle("/api/user/plan", chain(
+			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet {
+					cfg.AuthHandler.HandleGetUserPlan(w, r)
+				} else if r.Method == http.MethodPut {
+					cfg.AuthHandler.HandleUpdatePlan(w, r)
+				} else {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusMethodNotAllowed)
+					json.NewEncoder(w).Encode(map[string]string{"error": "method_not_allowed"})
+				}
+			}),
+			authMW,
+		))
 	}
 
 	// Protected routes - Project CRUD
