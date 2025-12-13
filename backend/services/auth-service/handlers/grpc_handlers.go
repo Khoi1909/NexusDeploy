@@ -38,7 +38,7 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
-// planLimits chứa giới hạn theo gói.
+// planLimits contains limits by plan.
 type planLimits struct {
 	MaxProjects        int32
 	MaxBuildsPerMonth  int32
@@ -181,7 +181,7 @@ func (s *AuthServiceServer) HandleOAuthCallback(ctx context.Context, req *pb.Han
 	}, nil
 }
 
-// ValidateToken parses JWT, kiểm tra blacklist và trả về thông tin user.
+// ValidateToken parses JWT, checks blacklist and returns user information.
 func (s *AuthServiceServer) ValidateToken(ctx context.Context, req *pb.ValidateTokenRequest) (*pb.ValidateTokenResponse, error) {
 	corrID := getCorrelationID(ctx)
 
@@ -225,7 +225,7 @@ func (s *AuthServiceServer) ValidateToken(ctx context.Context, req *pb.ValidateT
 	}, nil
 }
 
-// GetUserPlan trả thông tin gói hiện tại của user.
+// GetUserPlan returns the current plan information for the user.
 func (s *AuthServiceServer) GetUserPlan(ctx context.Context, req *pb.GetUserPlanRequest) (*pb.GetUserPlanResponse, error) {
 	corrID := getCorrelationID(ctx)
 
@@ -278,7 +278,7 @@ func (s *AuthServiceServer) CheckPermission(ctx context.Context, req *pb.CheckPe
 		return nil, fmt.Errorf("query user for permission: %w", err)
 	}
 
-	// Kiểm tra explicit permission.
+	// Check explicit permission.
 	var perm models.Permission
 	err := s.db.WithContext(ctx).
 		Where("user_id = ? AND resource = ? AND action = ?", user.ID, req.ResourceType, req.Action).
@@ -296,7 +296,7 @@ func (s *AuthServiceServer) CheckPermission(ctx context.Context, req *pb.CheckPe
 		if user.Plan != "premium" {
 			return &pb.CheckPermissionResponse{
 				Allowed: false,
-				Reason:  "Custom domain yêu cầu gói Premium",
+				Reason:  "Custom domain requires Premium plan",
 			}, nil
 		}
 	}
@@ -304,6 +304,83 @@ func (s *AuthServiceServer) CheckPermission(ctx context.Context, req *pb.CheckPe
 	return &pb.CheckPermissionResponse{
 		Allowed: true,
 		Reason:  "allowed by plan",
+	}, nil
+}
+
+// UpdatePlan cập nhật plan của user (admin/internal use)
+func (s *AuthServiceServer) UpdatePlan(ctx context.Context, req *pb.UpdatePlanRequest) (*pb.UpdatePlanResponse, error) {
+	corrID := getCorrelationID(ctx)
+	log.Info().
+		Str("correlation_id", corrID).
+		Str("user_id", req.UserId).
+		Str("new_plan", req.Plan).
+		Msg("UpdatePlan called")
+
+	if req.UserId == "" {
+		return &pb.UpdatePlanResponse{
+			Success: false,
+			Error:   "user_id is required",
+		}, nil
+	}
+
+	if req.Plan != "standard" && req.Plan != "premium" {
+		return &pb.UpdatePlanResponse{
+			Success: false,
+			Error:   "invalid plan. Must be 'standard' or 'premium'",
+		}, nil
+	}
+
+	var user models.User
+	if err := s.db.WithContext(ctx).Where("id = ?", req.UserId).First(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return &pb.UpdatePlanResponse{
+				Success: false,
+				Error:   "user not found",
+			}, nil
+		}
+		log.Error().Err(err).Str("correlation_id", corrID).Msg("query user failed")
+		return nil, fmt.Errorf("query user: %w", err)
+	}
+
+	oldPlan := user.Plan
+	newPlan := req.Plan
+
+	// Validation: If downgrading, check if user exceeds new plan limits (FR7.6.3)
+	if oldPlan == "premium" && newPlan == "standard" {
+		// Get current plan limits
+		newLimits := planMatrix[newPlan]
+		if newLimits == (planLimits{}) {
+			newLimits = planMatrix[defaultPlan]
+		}
+
+		// Check projects count
+		// Note: We can't check this directly here as we don't have access to project_db
+		// This validation should be done by the caller (API Gateway) that has access to both services
+		// or we could add a helper method that calls Project Service
+		log.Info().
+			Str("correlation_id", corrID).
+			Str("user_id", req.UserId).
+			Str("old_plan", oldPlan).
+			Str("new_plan", newPlan).
+			Int32("max_projects", newLimits.MaxProjects).
+			Msg("Downgrading plan - validation should be done by caller")
+	}
+
+	// Update plan
+	if err := s.db.WithContext(ctx).Model(&user).Update("plan", newPlan).Error; err != nil {
+		log.Error().Err(err).Str("correlation_id", corrID).Msg("update plan failed")
+		return nil, fmt.Errorf("update plan: %w", err)
+	}
+
+	log.Info().
+		Str("correlation_id", corrID).
+		Str("user_id", req.UserId).
+		Str("old_plan", oldPlan).
+		Str("new_plan", newPlan).
+		Msg("Plan updated successfully")
+
+	return &pb.UpdatePlanResponse{
+		Success: true,
 	}, nil
 }
 
@@ -354,7 +431,7 @@ func (s *AuthServiceServer) RefreshToken(ctx context.Context, req *pb.RefreshTok
 		return nil, fmt.Errorf("query refresh token: %w", err)
 	}
 
-	// Kiểm tra hết hạn
+	// Check expiration
 	if time.Now().After(storedToken.ExpiresAt) {
 		// Xoá token hết hạn
 		_ = s.db.WithContext(ctx).Delete(&storedToken)
@@ -437,6 +514,7 @@ func (s *AuthServiceServer) GetGitHubToken(ctx context.Context, req *pb.GetGitHu
 	log.Info().Str("correlation_id", corrID).Str("user_id", req.UserId).Msg("GetGitHubToken called")
 
 	if req.UserId == "" {
+		log.Warn().Str("correlation_id", corrID).Msg("GetGitHubToken called with empty user_id")
 		return &pb.GetGitHubTokenResponse{Error: "user_id is required"}, nil
 	}
 
@@ -444,24 +522,27 @@ func (s *AuthServiceServer) GetGitHubToken(ctx context.Context, req *pb.GetGitHu
 	var user models.User
 	if err := s.db.WithContext(ctx).Where("id = ?", req.UserId).First(&user).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
+			log.Warn().Str("correlation_id", corrID).Str("user_id", req.UserId).Msg("User not found when getting GitHub token")
 			return &pb.GetGitHubTokenResponse{Error: "user not found"}, nil
 		}
-		log.Error().Err(err).Str("correlation_id", corrID).Msg("query user for github token failed")
+		log.Error().Err(err).Str("correlation_id", corrID).Str("user_id", req.UserId).Msg("Database query failed when getting GitHub token")
 		return nil, fmt.Errorf("query user: %w", err)
 	}
 
 	// Check if token exists
 	if user.GithubTokenEncrypted == "" {
+		log.Warn().Str("correlation_id", corrID).Str("user_id", req.UserId).Msg("GitHub token not found in user record")
 		return &pb.GetGitHubTokenResponse{Error: "github token not found"}, nil
 	}
 
 	// Decrypt GitHub token
 	decryptedToken, err := cryptopkg.DecryptString(s.cfg.MasterEncryptionKey, user.GithubTokenEncrypted)
 	if err != nil {
-		log.Error().Err(err).Str("correlation_id", corrID).Msg("decrypt github token failed")
+		log.Error().Err(err).Str("correlation_id", corrID).Str("user_id", req.UserId).Msg("Failed to decrypt GitHub token")
 		return &pb.GetGitHubTokenResponse{Error: "failed to decrypt token"}, nil
 	}
 
+	log.Info().Str("correlation_id", corrID).Str("user_id", req.UserId).Msg("Successfully retrieved GitHub token")
 	return &pb.GetGitHubTokenResponse{
 		GithubToken: decryptedToken,
 	}, nil

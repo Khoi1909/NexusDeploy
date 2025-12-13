@@ -9,6 +9,7 @@ import (
 
 	commonmw "github.com/nexusdeploy/backend/pkg/middleware"
 	apimw "github.com/nexusdeploy/backend/services/api-gateway/middleware"
+	authpb "github.com/nexusdeploy/backend/services/auth-service/proto"
 	buildpb "github.com/nexusdeploy/backend/services/build-service/proto"
 	deploymentpb "github.com/nexusdeploy/backend/services/deployment-service/proto"
 	projectpb "github.com/nexusdeploy/backend/services/project-service/proto"
@@ -34,11 +35,17 @@ type ProjectServiceClientForDeployment interface {
 	GetSecrets(ctx context.Context, in *projectpb.GetSecretsRequest, opts ...grpc.CallOption) (*projectpb.GetSecretsResponse, error)
 }
 
+// AuthServiceClientForDeployment defines methods needed from Auth Service
+type AuthServiceClientForDeployment interface {
+	GetUserPlan(ctx context.Context, in *authpb.GetUserPlanRequest, opts ...grpc.CallOption) (*authpb.GetUserPlanResponse, error)
+}
+
 // DeploymentHandler handles deployment-related requests
 type DeploymentHandler struct {
 	DeploymentClient DeploymentServiceClient
 	BuildClient      BuildServiceClientForDeployment
 	ProjectClient    ProjectServiceClientForDeployment
+	AuthClient       AuthServiceClientForDeployment
 	RegistryURL      string
 }
 
@@ -47,6 +54,7 @@ func NewDeploymentHandler(
 	deploymentClient DeploymentServiceClient,
 	buildClient BuildServiceClientForDeployment,
 	projectClient ProjectServiceClientForDeployment,
+	authClient AuthServiceClientForDeployment,
 ) *DeploymentHandler {
 	registryURL := os.Getenv("REGISTRY_URL")
 	if registryURL == "" {
@@ -57,6 +65,7 @@ func NewDeploymentHandler(
 		DeploymentClient: deploymentClient,
 		BuildClient:      buildClient,
 		ProjectClient:    projectClient,
+		AuthClient:       authClient,
 		RegistryURL:      registryURL,
 	}
 }
@@ -98,11 +107,12 @@ func (h *DeploymentHandler) Deploy(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	// Step 1: Get latest successful build
+	// Fetch multiple builds to find the latest successful one (latest build might be running/pending)
 	buildsResp, err := h.BuildClient.ListBuilds(ctx, &buildpb.ListBuildsRequest{
 		ProjectId: projectID,
 		UserId:    userID,
 		Page:      1,
-		PageSize:  1,
+		PageSize:  10,
 	})
 	if err != nil {
 		statusCode, message, _ := commonmw.HandleGRPCError(err)
@@ -173,10 +183,14 @@ func (h *DeploymentHandler) Deploy(w http.ResponseWriter, r *http.Request) {
 	// Step 4: Generate image tag
 	// Format: {registry_url}/{project_id}:{short_sha}
 	shortSHA := latestBuild.CommitSha
-	if len(shortSHA) > 7 {
-		shortSHA = shortSHA[:7]
+	if shortSHA == "" {
+		shortSHA = latestBuild.Id // Fallback to build ID
 	}
-	imageTag := fmt.Sprintf("%s/%s:%s", h.RegistryURL, projectID, shortSHA)
+	if len(shortSHA) > 8 {
+		shortSHA = shortSHA[:8]
+	}
+	// Use "nexus/" prefix to match runner-service local image tag
+	imageTag := fmt.Sprintf("nexus/%s:%s", projectID, shortSHA)
 
 	// Step 5: Generate domain
 	// Format: {project_id}.{base_domain} or use project_id as subdomain
@@ -201,7 +215,7 @@ func (h *DeploymentHandler) Deploy(w http.ResponseWriter, r *http.Request) {
 		UserId: userID,
 	}
 
-	// Step 7: Call Deployment Service
+	// Step 8: Call Deployment Service
 	deployResp, err := h.DeploymentClient.Deploy(ctx, &deploymentpb.DeployRequest{
 		Spec: deploymentSpec,
 	})

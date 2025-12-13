@@ -73,7 +73,7 @@ func AuthMiddleware(authClient AuthClient) func(http.Handler) http.Handler {
 				return
 			}
 
-			// Kiểm tra response
+			// Check response
 			if !resp.Valid {
 				log.Warn().
 					Str("correlation_id", corrID).

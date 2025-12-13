@@ -71,7 +71,7 @@ func (rl *RateLimiter) getVisitor(ip string) *visitor {
 	return v
 }
 
-// Allow kiểm tra xem request có được phép không
+// Allow checks if the request is allowed
 func (rl *RateLimiter) Allow(ip string) bool {
 	v := rl.getVisitor(ip)
 
@@ -80,13 +80,13 @@ func (rl *RateLimiter) Allow(ip string) bool {
 
 	now := time.Now()
 
-	// Reset nếu đã hết window
+	// Reset if window has expired
 	if now.Sub(v.lastSeen) > rl.window {
 		v.count = 0
 		v.lastSeen = now
 	}
 
-	// Kiểm tra rate limit
+	// Check rate limit
 	if v.count >= rl.rate {
 		return false
 	}
@@ -120,14 +120,14 @@ func RateLimit(rate int, window time.Duration) func(http.Handler) http.Handler {
 	}
 }
 
-// getClientIP lấy IP address của client
+// getClientIP gets the client IP address
 func getClientIP(r *http.Request) string {
-	// Kiểm tra X-Forwarded-For header (khi đằng sau proxy)
+	// Check X-Forwarded-For header (when behind proxy)
 	if ip := r.Header.Get("X-Forwarded-For"); ip != "" {
 		return ip
 	}
 
-	// Kiểm tra X-Real-IP header
+	// Check X-Real-IP header
 	if ip := r.Header.Get("X-Real-IP"); ip != "" {
 		return ip
 	}

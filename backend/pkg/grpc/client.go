@@ -114,7 +114,7 @@ func AddCorrelationIDToContext(ctx context.Context, corrID string) context.Conte
 	return context.WithValue(ctx, "correlation_id", corrID)
 }
 
-// IsRetryableError kiểm tra xem lỗi có thể retry được không
+// IsRetryableError checks if the error can be retried
 func IsRetryableError(err error) bool {
 	if err == nil {
 		return false

@@ -86,7 +86,7 @@ func (c *GitHubClient) GenerateAuthURL(ctx context.Context, customRedirectURL st
 	return authURL, state, nil
 }
 
-// ValidateState kiểm tra và xoá state từ Redis.
+// ValidateState checks and deletes state from Redis.
 func (c *GitHubClient) ValidateState(ctx context.Context, state string) error {
 	if state == "" {
 		return ErrStateMismatch
@@ -237,4 +237,3 @@ func (c *GitHubClient) FetchUserWithEmail(ctx context.Context, accessToken strin
 
 	return user, nil
 }
-

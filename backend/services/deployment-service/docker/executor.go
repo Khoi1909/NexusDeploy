@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -144,17 +145,47 @@ func (e *Executor) Deploy(ctx context.Context, spec *deploymentpb.DeploymentSpec
 		StartedAt: time.Now(),
 	}
 
-	// Pull the image
-	e.log.Debug().Str("image", spec.ImageTag).Msg("Pulling image")
-	reader, err := e.client.ImagePull(ctx, spec.ImageTag, image.PullOptions{})
+	// Check local image first, if not available then pull from registry
+	e.log.Debug().Str("image", spec.ImageTag).Msg("Checking local image")
+	_, _, err := e.client.ImageInspectWithRaw(ctx, spec.ImageTag)
 	if err != nil {
-		deployment.Status = deploymentpb.DeploymentStatus_DEPLOYMENT_STATUS_FAILED
-		deployment.Error = fmt.Sprintf("pull image: %v", err)
-		e.storeDeployment(deployment)
-		return deployment, fmt.Errorf("pull image: %w", err)
+		// Image không có local, thử pull từ registry
+		e.log.Debug().Str("image", spec.ImageTag).Msg("Image not found locally, trying to pull...")
+		reader, pullErr := e.client.ImagePull(ctx, spec.ImageTag, image.PullOptions{})
+		if pullErr != nil {
+			// Pull fail, thử tìm với prefix nexus/ (image được build local)
+			localTag := spec.ImageTag
+			if !strings.HasPrefix(localTag, "nexus/") {
+				// Thử chuyển từ registry_url/project:tag sang nexus/project:tag
+				parts := strings.SplitN(localTag, "/", 2)
+				if len(parts) == 2 {
+					localTag = "nexus/" + parts[1]
+				}
+			}
+
+			e.log.Debug().Str("local_tag", localTag).Msg("Trying local image with nexus/ prefix")
+			_, _, localErr := e.client.ImageInspectWithRaw(ctx, localTag)
+			if localErr == nil {
+				// Tìm thấy image local với prefix khác
+				e.log.Info().
+					Str("original", spec.ImageTag).
+					Str("local", localTag).
+					Msg("Using local image instead of registry")
+				spec.ImageTag = localTag
+			} else {
+				// Không tìm thấy image nào
+				deployment.Status = deploymentpb.DeploymentStatus_DEPLOYMENT_STATUS_FAILED
+				deployment.Error = fmt.Sprintf("pull image: %v", pullErr)
+				e.storeDeployment(deployment)
+				return deployment, fmt.Errorf("pull image: %w (local check also failed: %v)", pullErr, localErr)
+			}
+		} else {
+			io.Copy(io.Discard, reader)
+			reader.Close()
+		}
+	} else {
+		e.log.Info().Str("image", spec.ImageTag).Msg("Image found locally, skipping pull")
 	}
-	io.Copy(io.Discard, reader)
-	reader.Close()
 
 	// Build container configuration
 	containerName := e.getContainerName(spec.ProjectId, deploymentID)
@@ -248,8 +279,11 @@ func (e *Executor) Deploy(ctx context.Context, spec *deploymentpb.DeploymentSpec
 
 	e.log.Info().
 		Str("deployment_id", deploymentID).
+		Str("project_id", spec.ProjectId).
 		Str("container_id", resp.ID).
 		Str("public_url", deployment.PublicURL).
+		Int32("container_port", spec.Port).
+		Int32("host_port", hostPort).
 		Msg("Deployment successful")
 
 	return deployment, nil
@@ -298,9 +332,11 @@ func (e *Executor) Stop(ctx context.Context, deploymentID, projectID string) err
 		e.releasePort(deployment.HostPort)
 	}
 
-	// Update status
+	// Update status and clear container ID to prevent future inspect attempts
 	e.mu.Lock()
 	deployment.Status = deploymentpb.DeploymentStatus_DEPLOYMENT_STATUS_STOPPED
+	deployment.ContainerID = "" // Clear container ID to prevent inspect attempts on removed container
+	e.deployments[deploymentID] = deployment
 	e.mu.Unlock()
 
 	e.log.Info().Str("deployment_id", deploymentID).Msg("Deployment stopped")
@@ -312,12 +348,17 @@ func (e *Executor) GetStatus(ctx context.Context, deploymentID, projectID string
 	e.mu.RLock()
 	deployment, exists := e.deployments[deploymentID]
 	if !exists {
-		// Try to find by project ID
+		// Try to find by project ID - get the latest one (most recent StartedAt)
+		var latestDeployment *Deployment
 		for _, d := range e.deployments {
 			if d.ProjectID == projectID {
-				deployment = d
-				break
+				if latestDeployment == nil || d.StartedAt.After(latestDeployment.StartedAt) {
+					latestDeployment = d
+				}
 			}
+		}
+		if latestDeployment != nil {
+			deployment = latestDeployment
 		}
 	}
 	e.mu.RUnlock()
@@ -335,20 +376,115 @@ func (e *Executor) GetStatus(ctx context.Context, deploymentID, projectID string
 		}
 	}
 
-	// Update status from Docker
+	// Update status from Docker (verify actual container status)
 	if deployment.ContainerID != "" {
 		inspect, err := e.client.ContainerInspect(ctx, deployment.ContainerID)
 		if err == nil {
+			// Determine actual status from Docker
+			var actualStatus deploymentpb.DeploymentStatus
 			if inspect.State.Running {
-				deployment.Status = deploymentpb.DeploymentStatus_DEPLOYMENT_STATUS_RUNNING
+				actualStatus = deploymentpb.DeploymentStatus_DEPLOYMENT_STATUS_RUNNING
 			} else if inspect.State.Restarting {
-				deployment.Status = deploymentpb.DeploymentStatus_DEPLOYMENT_STATUS_RESTARTING
+				actualStatus = deploymentpb.DeploymentStatus_DEPLOYMENT_STATUS_RESTARTING
+			} else if inspect.State.Status == "exited" && inspect.State.ExitCode == 0 {
+				actualStatus = deploymentpb.DeploymentStatus_DEPLOYMENT_STATUS_STOPPED
 			} else {
-				deployment.Status = deploymentpb.DeploymentStatus_DEPLOYMENT_STATUS_STOPPED
+				actualStatus = deploymentpb.DeploymentStatus_DEPLOYMENT_STATUS_FAILED
 			}
+
+			// Update deployment status if it differs from actual Docker status
+			statusChanged := deployment.Status != actualStatus
+
+			// Update PublicURL if container is running and URL is empty
+			publicURLUpdated := false
+			if actualStatus == deploymentpb.DeploymentStatus_DEPLOYMENT_STATUS_RUNNING && deployment.PublicURL == "" {
+				// Try to reconstruct public URL from port mapping or labels
+				if deployment.HostPort > 0 {
+					baseDomain := os.Getenv("BASE_DOMAIN")
+					if baseDomain == "" {
+						baseDomain = "localhost"
+					}
+					// Use hostPort directly if BASE_DOMAIN is localhost, otherwise use domain format
+					if baseDomain == "localhost" {
+						deployment.PublicURL = fmt.Sprintf("http://localhost:%d", deployment.HostPort)
+					} else {
+						deployment.PublicURL = fmt.Sprintf("https://%s.%s", deployment.ProjectID, baseDomain)
+					}
+					publicURLUpdated = true
+					e.log.Info().
+						Str("deployment_id", deploymentID).
+						Str("public_url", deployment.PublicURL).
+						Msg("Reconstructed public URL from port mapping")
+				} else if domain, ok := inspect.Config.Labels["nexus.domain"]; ok {
+					deployment.PublicURL = fmt.Sprintf("https://%s", domain)
+					publicURLUpdated = true
+					e.log.Info().
+						Str("deployment_id", deploymentID).
+						Str("public_url", deployment.PublicURL).
+						Msg("Reconstructed public URL from label")
+				}
+			}
+
+			// Update in-memory store if status or URL changed
+			if statusChanged || publicURLUpdated {
+				if statusChanged {
+					e.log.Info().
+						Str("deployment_id", deploymentID).
+						Str("old_status", deployment.Status.String()).
+						Str("new_status", actualStatus.String()).
+						Msg("Updating deployment status from Docker")
+				}
+				deployment.Status = actualStatus
+				e.mu.Lock()
+				e.deployments[deploymentID] = deployment
+				e.mu.Unlock()
+			}
+
 			// Update container ID if it changed
 			if inspect.ID != deployment.ContainerID {
 				deployment.ContainerID = inspect.ID
+			}
+		} else {
+			// Container not found - check if it was intentionally stopped
+			isContainerNotFound := strings.Contains(err.Error(), "No such container") ||
+				strings.Contains(err.Error(), "container not found")
+
+			if isContainerNotFound {
+				// Container was removed (likely intentionally stopped)
+				// Only update status if it's not already STOPPED to avoid spam
+				if deployment.Status != deploymentpb.DeploymentStatus_DEPLOYMENT_STATUS_STOPPED {
+					e.log.Info().
+						Str("deployment_id", deploymentID).
+						Str("container_id", deployment.ContainerID).
+						Msg("Container not found, marking deployment as stopped")
+
+					deployment.Status = deploymentpb.DeploymentStatus_DEPLOYMENT_STATUS_STOPPED
+					// Clear container ID to prevent future inspect attempts
+					deployment.ContainerID = ""
+
+					e.mu.Lock()
+					e.deployments[deploymentID] = deployment
+					e.mu.Unlock()
+				}
+			} else {
+				// Other error - try to recover from labels (only once, not repeatedly)
+				e.log.Debug().
+					Err(err).
+					Str("deployment_id", deploymentID).
+					Str("container_id", deployment.ContainerID).
+					Msg("Failed to inspect container, attempting recovery")
+
+				// Only attempt recovery if status is not STOPPED
+				if deployment.Status != deploymentpb.DeploymentStatus_DEPLOYMENT_STATUS_STOPPED {
+					recovered, recoverErr := e.recoverDeploymentFromContainer(ctx, deployment.ProjectID)
+					if recoverErr == nil && recovered != nil && recovered.ContainerID != deployment.ContainerID {
+						// Found a different container, update deployment
+						e.mu.Lock()
+						e.deployments[deploymentID] = recovered
+						e.mu.Unlock()
+						deployment = recovered
+					}
+				}
 			}
 		}
 	}

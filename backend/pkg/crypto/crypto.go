@@ -63,7 +63,7 @@ func newAEAD(key string) (cipher.AEAD, error) {
 	return cipher.NewGCM(block)
 }
 
-// deriveKey mở rộng/thu gọn key để đạt 32 bytes.
+// deriveKey extends/truncates key to reach 32 bytes.
 func deriveKey(key []byte) []byte {
 	const size = 32
 	if len(key) == size {

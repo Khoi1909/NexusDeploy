@@ -77,13 +77,13 @@ func (rl *PlanBasedRateLimiter) getLimiter(key string, plan string) *RateLimiter
 	return limiter
 }
 
-// Allow kiểm tra xem request có được phép không
+// Allow checks if the request is allowed
 func (rl *PlanBasedRateLimiter) Allow(key string, plan string) bool {
 	rate := planRateLimits[plan]
 	if rate == 0 {
 		rate = planRateLimits["standard"]
 	}
-	// Nếu rate limit = 0, không giới hạn
+	// If rate limit = 0, no limit
 	if rate == 0 {
 		return true
 	}
@@ -91,33 +91,33 @@ func (rl *PlanBasedRateLimiter) Allow(key string, plan string) bool {
 	return limiter.Allow(key)
 }
 
-// PlanBasedRateLimit middleware áp dụng rate limiting dựa trên plan
-// getPlanFunc: function để lấy plan từ request context
-// getUserIDFunc: function để lấy user ID từ request context
+// PlanBasedRateLimit middleware applies rate limiting based on plan
+// getPlanFunc: function to get plan from request context
+// getUserIDFunc: function to get user ID from request context
 func PlanBasedRateLimit(window time.Duration, getPlanFunc func(*http.Request) string, getUserIDFunc func(*http.Request) string) func(http.Handler) http.Handler {
 	limiter := NewPlanBasedRateLimiter(window)
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Lấy plan từ context
+			// Get plan from context
 			plan := getPlanFunc(r)
 			if plan == "" {
-				// Nếu không có plan (unauthenticated), dùng standard plan
+				// If no plan (unauthenticated), use standard plan
 				plan = "standard"
 			}
 
-			// Kiểm tra rate limit cho plan này
+			// Check rate limit for this plan
 			rate := planRateLimits[plan]
 			if rate == 0 {
 				rate = planRateLimits["standard"]
 			}
-			// Nếu rate limit = 0, không giới hạn - cho phép request
+			// If rate limit = 0, no limit - allow request
 			if rate == 0 {
 				next.ServeHTTP(w, r)
 				return
 			}
 
-			// Sử dụng userID nếu có, nếu không thì dùng IP
+			// Use userID if available, otherwise use IP
 			key := getUserIDFunc(r)
 			if key == "" {
 				key = getClientIP(r)
@@ -139,4 +139,3 @@ func PlanBasedRateLimit(window time.Duration, getPlanFunc func(*http.Request) st
 		})
 	}
 }
-
