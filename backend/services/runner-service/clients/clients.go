@@ -28,16 +28,22 @@ type ClientsConfig struct {
 	ProjectServiceAddr string
 	Timeout            time.Duration
 	MaxRetries         int
+	TLSEnabled         bool
+	TLSCertPath        string
+	InsecureSkipVerify bool
 }
 
 // NewClients creates and connects all gRPC clients
 func NewClients(ctx context.Context, cfg ClientsConfig, log zerolog.Logger) (*Clients, error) {
 	// Connect to Build Service
 	buildConn, err := grpcpkg.NewClient(ctx, grpcpkg.ClientConfig{
-		Address:     cfg.BuildServiceAddr,
-		Timeout:     cfg.Timeout,
-		MaxRetries:  cfg.MaxRetries,
-		ServiceName: "build-service",
+		Address:            cfg.BuildServiceAddr,
+		Timeout:            cfg.Timeout,
+		MaxRetries:         cfg.MaxRetries,
+		ServiceName:        "build-service",
+		TLSEnabled:         cfg.TLSEnabled,
+		TLSCertPath:        cfg.TLSCertPath,
+		InsecureSkipVerify: cfg.InsecureSkipVerify,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("connect to build service: %w", err)
@@ -45,10 +51,13 @@ func NewClients(ctx context.Context, cfg ClientsConfig, log zerolog.Logger) (*Cl
 
 	// Connect to Project Service
 	projectConn, err := grpcpkg.NewClient(ctx, grpcpkg.ClientConfig{
-		Address:     cfg.ProjectServiceAddr,
-		Timeout:     cfg.Timeout,
-		MaxRetries:  cfg.MaxRetries,
-		ServiceName: "project-service",
+		Address:            cfg.ProjectServiceAddr,
+		Timeout:            cfg.Timeout,
+		MaxRetries:         cfg.MaxRetries,
+		ServiceName:        "project-service",
+		TLSEnabled:         cfg.TLSEnabled,
+		TLSCertPath:        cfg.TLSCertPath,
+		InsecureSkipVerify: cfg.InsecureSkipVerify,
 	})
 	if err != nil {
 		buildConn.Close()
@@ -152,4 +161,3 @@ func (c *Clients) GetProject(ctx context.Context, projectID, userID string) (*pr
 	}
 	return resp.Project, nil
 }
-

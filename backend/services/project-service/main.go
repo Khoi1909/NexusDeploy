@@ -67,10 +67,13 @@ func main() {
 	defer cancel()
 
 	authConn, err := grpcpkg.NewClient(ctx, grpcpkg.ClientConfig{
-		Address:     cfg.AuthServiceAddr,
-		Timeout:     5 * time.Second,
-		MaxRetries:  3,
-		ServiceName: "auth-service",
+		Address:            cfg.AuthServiceAddr,
+		Timeout:            5 * time.Second,
+		MaxRetries:         3,
+		ServiceName:        "auth-service",
+		TLSEnabled:         cfg.GRPCTLSEnabled,
+		TLSCertPath:        cfg.GRPCTLSCertPath,
+		InsecureSkipVerify: cfg.GRPCInsecureSkipVerify,
 	})
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to connect to Auth Service")

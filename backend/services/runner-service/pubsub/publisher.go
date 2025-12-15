@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
@@ -197,8 +199,30 @@ func NewLogCollectorWithProject(publisher *Publisher, projectID, buildID string,
 	}
 }
 
+// sanitizeUTF8 removes invalid UTF-8 sequences from a string
+func sanitizeUTF8(s string) string {
+	if utf8.ValidString(s) {
+		return s
+	}
+	// Replace invalid UTF-8 with replacement character
+	var b strings.Builder
+	for i, r := range s {
+		if r == utf8.RuneError {
+			_, size := utf8.DecodeRuneInString(s[i:])
+			if size == 1 {
+				b.WriteRune('?')
+				continue
+			}
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
 // Add adds a log line and publishes if batch is full
 func (c *LogCollector) Add(ctx context.Context, line string) error {
+	// Sanitize UTF-8 before storing
+	line = sanitizeUTF8(line)
 	// Add to logs array first (for database storage later)
 	c.logs = append(c.logs, line)
 
@@ -210,7 +234,9 @@ func (c *LogCollector) Add(ctx context.Context, line string) error {
 	// Save to database in batches to ensure logs are persisted even if build fails
 	if c.appendFunc != nil && len(c.logs) >= c.batchSize {
 		batch := make([]string, len(c.logs))
-		copy(batch, c.logs)
+		for i, log := range c.logs {
+			batch[i] = sanitizeUTF8(log)
+		}
 		if err := c.appendFunc(ctx, c.buildID, batch); err != nil {
 			// Log error but don't fail - continue collecting logs
 			c.publisher.log.Warn().Err(err).Msg("Failed to save log batch to database")
@@ -228,7 +254,9 @@ func (c *LogCollector) Flush(ctx context.Context) error {
 	// Save any remaining logs to database
 	if c.appendFunc != nil && len(c.logs) > 0 {
 		batch := make([]string, len(c.logs))
-		copy(batch, c.logs)
+		for i, log := range c.logs {
+			batch[i] = sanitizeUTF8(log)
+		}
 		if err := c.appendFunc(ctx, c.buildID, batch); err != nil {
 			return fmt.Errorf("flush logs: %w", err)
 		}

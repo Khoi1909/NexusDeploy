@@ -60,6 +60,9 @@ func main() {
 		ProjectServiceAddr: cfg.ProjectServiceAddr,
 		Timeout:            10 * time.Second,
 		MaxRetries:         3,
+		TLSEnabled:         cfg.GRPCTLSEnabled,
+		TLSCertPath:        cfg.GRPCTLSCertPath,
+		InsecureSkipVerify: cfg.GRPCInsecureSkipVerify,
 	}, log)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to initialize gRPC clients")

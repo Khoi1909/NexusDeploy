@@ -131,8 +131,9 @@ func (s *AuthServiceServer) HandleOAuthCallback(ctx context.Context, req *pb.Han
 		return &pb.HandleOAuthResponse{Error: "code và state là bắt buộc"}, nil
 	}
 
-	// Validate state
-	if err := s.githubClient.ValidateState(ctx, req.State); err != nil {
+	// Validate state and get redirect URL
+	redirectURL, err := s.githubClient.ValidateState(ctx, req.State)
+	if err != nil {
 		log.Warn().Err(err).Str("correlation_id", corrID).Msg("oauth state validation failed")
 		return &pb.HandleOAuthResponse{Error: "invalid or expired state"}, nil
 	}
@@ -178,6 +179,7 @@ func (s *AuthServiceServer) HandleOAuthCallback(ctx context.Context, req *pb.Han
 		UserId:        user.ID,
 		Plan:          user.Plan,
 		ExpiresAtUnix: expiresAt.Unix(),
+		RedirectUrl:   redirectURL,
 	}, nil
 }
 

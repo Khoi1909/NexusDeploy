@@ -59,6 +59,7 @@ message HandleOAuthResponse {
   string user_id = 3;
   string plan = 4;
   int64  expires_at_unix = 5; // epoch seconds
+  string redirect_url = 7; // Original redirect URL from OAuth flow
   string error = 6;
 }
 

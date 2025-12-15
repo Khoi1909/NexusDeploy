@@ -62,23 +62,28 @@ type GitHubUser struct {
 }
 
 // GenerateAuthURL tạo URL xác thực GitHub và lưu state vào Redis.
+// customRedirectURL là URL để redirect về frontend sau khi OAuth xong (không phải redirect_uri gửi đến GitHub)
 func (c *GitHubClient) GenerateAuthURL(ctx context.Context, customRedirectURL string) (authURL string, state string, err error) {
 	state = uuid.NewString()
 
-	// Lưu state vào Redis với TTL
+	// Lưu state và frontend redirect_url vào Redis với TTL
+	// customRedirectURL là URL để redirect về frontend, không phải redirect_uri cho GitHub
 	stateKey := oauthStatePrefix + state
-	if err := c.Redis.Set(ctx, stateKey, "1", oauthStateTTL).Err(); err != nil {
+	frontendRedirectURL := customRedirectURL
+	if frontendRedirectURL == "" {
+		// Nếu không có customRedirectURL, dùng mặc định từ c.RedirectURL (nhưng đây là callback URL, không phải frontend URL)
+		// Tốt nhất là để empty và để API Gateway tự detect
+		frontendRedirectURL = ""
+	}
+	// Lưu frontend redirect URL cùng với state để lấy lại sau
+	if err := c.Redis.Set(ctx, stateKey, frontendRedirectURL, oauthStateTTL).Err(); err != nil {
 		return "", "", fmt.Errorf("store oauth state: %w", err)
 	}
 
-	redirectURL := c.RedirectURL
-	if customRedirectURL != "" {
-		redirectURL = customRedirectURL
-	}
-
+	// redirect_uri gửi đến GitHub phải luôn là callback URL của API Gateway
 	query := url.Values{}
 	query.Set("client_id", c.ClientID)
-	query.Set("redirect_uri", redirectURL)
+	query.Set("redirect_uri", c.RedirectURL) // Luôn dùng c.RedirectURL (callback URL của API Gateway)
 	query.Set("state", state)
 	query.Set("scope", "repo,user:email")
 
@@ -86,21 +91,30 @@ func (c *GitHubClient) GenerateAuthURL(ctx context.Context, customRedirectURL st
 	return authURL, state, nil
 }
 
-// ValidateState checks and deletes state from Redis.
-func (c *GitHubClient) ValidateState(ctx context.Context, state string) error {
+// ValidateState checks and deletes state from Redis, returns the stored redirect URL if any.
+func (c *GitHubClient) ValidateState(ctx context.Context, state string) (string, error) {
 	if state == "" {
-		return ErrStateMismatch
+		return "", ErrStateMismatch
 	}
 
 	stateKey := oauthStatePrefix + state
-	deleted, err := c.Redis.Del(ctx, stateKey).Result()
+	redirectURL, err := c.Redis.Get(ctx, stateKey).Result()
 	if err != nil {
-		return fmt.Errorf("delete oauth state: %w", err)
+		if err == redis.Nil {
+			return "", ErrStateNotFound
+		}
+		return "", fmt.Errorf("get oauth state: %w", err)
 	}
-	if deleted == 0 {
-		return ErrStateNotFound
+	if err != nil {
+		return "", fmt.Errorf("get oauth state: %w", err)
 	}
-	return nil
+
+	// Delete state after validation
+	if err := c.Redis.Del(ctx, stateKey).Err(); err != nil {
+		return "", fmt.Errorf("delete oauth state: %w", err)
+	}
+
+	return redirectURL, nil
 }
 
 // ExchangeCode đổi authorization code lấy access token.

@@ -749,7 +749,8 @@ func (e *DockerExecutor) generateDockerfile(bc *BuildContext) string {
 	switch preset {
 	case "nodejs", "node":
 		dockerfile.WriteString("COPY package*.json ./\n")
-		dockerfile.WriteString("RUN npm ci --only=production || npm install --production\n")
+		// Install all dependencies (including devDependencies) for build stage
+		dockerfile.WriteString("RUN npm ci || npm install\n")
 	case "python":
 		dockerfile.WriteString("COPY requirements.txt ./\n")
 		dockerfile.WriteString("RUN pip install --no-cache-dir -r requirements.txt || true\n")

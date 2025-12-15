@@ -790,11 +790,9 @@ func (e *Executor) getDomain(spec *deploymentpb.DeploymentSpec) string {
 		return spec.Domain
 	}
 	// Generate subdomain from project ID
-	shortID := spec.ProjectId
-	if len(shortID) > 8 {
-		shortID = shortID[:8]
-	}
-	return fmt.Sprintf("%s.%s", shortID, e.traefikDomainSuffix)
+	// Use full project ID, but replace hyphens with dots for valid subdomain format
+	projectID := strings.ReplaceAll(spec.ProjectId, "-", ".")
+	return fmt.Sprintf("%s.%s", projectID, e.traefikDomainSuffix)
 }
 
 func (e *Executor) buildEnvVars(spec *deploymentpb.DeploymentSpec) []string {
@@ -848,6 +846,7 @@ func (e *Executor) buildTraefikLabels(containerName, domain string, port int32) 
 		"traefik.enable": "true",
 		fmt.Sprintf("traefik.http.routers.%s.rule", routerName):                      fmt.Sprintf("Host(`%s`)", domain),
 		fmt.Sprintf("traefik.http.routers.%s.entrypoints", routerName):               e.traefikEntrypoint,
+		fmt.Sprintf("traefik.http.routers.%s.tls.certresolver", routerName):          "letsencrypt",
 		fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port", routerName): fmt.Sprintf("%d", port),
 		// Add network
 		"traefik.docker.network": e.traefikNetwork,
