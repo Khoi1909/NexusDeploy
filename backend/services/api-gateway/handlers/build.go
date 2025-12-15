@@ -8,6 +8,7 @@ import (
 	"time"
 
 	commonmw "github.com/nexusdeploy/backend/pkg/middleware"
+	aipb "github.com/nexusdeploy/backend/services/ai-service/proto"
 	apimw "github.com/nexusdeploy/backend/services/api-gateway/middleware"
 	buildpb "github.com/nexusdeploy/backend/services/build-service/proto"
 	"google.golang.org/grpc"
@@ -23,14 +24,23 @@ type BuildServiceClient interface {
 	DeleteBuildLogs(ctx context.Context, in *buildpb.DeleteBuildLogsRequest, opts ...grpc.CallOption) (*buildpb.DeleteBuildLogsResponse, error)
 }
 
+// AIServiceClient defines the methods of AI Service
+type AIServiceClient interface {
+	AnalyzeBuild(ctx context.Context, in *aipb.AnalyzeBuildRequest, opts ...grpc.CallOption) (*aipb.AnalyzeBuildResponse, error)
+}
+
 // BuildHandler handles build-related requests
 type BuildHandler struct {
-	Client BuildServiceClient
+	Client   BuildServiceClient
+	AIClient AIServiceClient
 }
 
 // NewBuildHandler creates a new BuildHandler
-func NewBuildHandler(client BuildServiceClient) *BuildHandler {
-	return &BuildHandler{Client: client}
+func NewBuildHandler(client BuildServiceClient, aiClient AIServiceClient) *BuildHandler {
+	return &BuildHandler{
+		Client:   client,
+		AIClient: aiClient,
+	}
 }
 
 // ==================== REST Response Types ====================
@@ -187,7 +197,7 @@ func (h *BuildHandler) ClearBuildLogs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"message":        "Build logs cleared",
+		"message":         "Build logs cleared",
 		"builds_affected": deleteResp.BuildsAffected,
 		"logs_deleted":    deleteResp.LogsDeleted,
 	})
@@ -333,6 +343,20 @@ func extractBuildIDFromLogsPath(path string) string {
 	return rest[:idx]
 }
 
+func extractBuildIDFromAnalyzePath(path string) string {
+	// /api/builds/{build_id}/analyze
+	const prefix = "/api/builds/"
+	if !strings.HasPrefix(path, prefix) {
+		return ""
+	}
+	rest := strings.TrimPrefix(path, prefix)
+	idx := strings.Index(rest, "/analyze")
+	if idx == -1 {
+		return ""
+	}
+	return rest[:idx]
+}
+
 func extractProjectIDFromBuildsLogsPath(path string) string {
 	// /api/projects/{project_id}/builds/logs
 	const prefix = "/api/projects/"
@@ -419,3 +443,84 @@ func statusToString(status buildpb.BuildStatus) string {
 	}
 }
 
+// AnalyzeBuild handles POST /api/builds/{id}/analyze
+func (h *BuildHandler) AnalyzeBuild(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+
+	userID := apimw.GetUserID(r.Context())
+	if userID == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+
+	// Extract build_id from path
+	buildID := extractBuildIDFromAnalyzePath(r.URL.Path)
+	if buildID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "build_id required"})
+		return
+	}
+
+	// Get user plan from auth context (set by AuthMiddleware)
+	userPlan := apimw.GetPlan(r.Context())
+	if userPlan == "" {
+		userPlan = "standard" // default fallback
+	}
+
+	// Check if build exists and belongs to user
+	buildResp, err := h.Client.GetBuild(r.Context(), &buildpb.GetBuildRequest{
+		BuildId: buildID,
+		UserId:  userID,
+	})
+	if err != nil {
+		statusCode, message, _ := commonmw.HandleGRPCError(err)
+		writeJSON(w, statusCode, map[string]string{"error": message})
+		return
+	}
+
+	if buildResp.Error != "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": buildResp.Error})
+		return
+	}
+
+	if buildResp.Build == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "build not found"})
+		return
+	}
+
+	// Only analyze failed builds
+	buildStatus := buildResp.Build.Status
+	if buildStatus != buildpb.BuildStatus_BUILD_STATUS_FAILED && buildStatus != buildpb.BuildStatus_BUILD_STATUS_DEPLOY_FAILED {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "can only analyze failed builds"})
+		return
+	}
+
+	// Call AI Service
+	if h.AIClient == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "AI service not available"})
+		return
+	}
+
+	aiResp, err := h.AIClient.AnalyzeBuild(r.Context(), &aipb.AnalyzeBuildRequest{
+		BuildId:  buildID,
+		UserPlan: userPlan,
+	})
+	if err != nil {
+		statusCode, message, _ := commonmw.HandleGRPCError(err)
+		writeJSON(w, statusCode, map[string]string{"error": message})
+		return
+	}
+
+	if aiResp.Error != "" {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": aiResp.Error})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"analysis":    aiResp.Analysis,
+		"suggestions": aiResp.Suggestions,
+		"cached":      aiResp.Cached,
+	})
+}

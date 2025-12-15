@@ -213,8 +213,13 @@ func NewRouter(cfg RouterConfig) http.Handler {
 
 		// Single build details: GET /api/builds/{id}
 		// Build logs: GET /api/builds/{id}/logs
+		// Analyze build: POST /api/builds/{id}/analyze
 		mux.Handle("/api/builds/", chain(
 			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if strings.HasSuffix(r.URL.Path, "/analyze") && r.Method == http.MethodPost {
+					cfg.BuildHandler.AnalyzeBuild(w, r)
+					return
+				}
 				if containsLogs(r.URL.Path) {
 					cfg.BuildHandler.GetBuildLogs(w, r)
 					return
@@ -250,7 +255,12 @@ func NewRouter(cfg RouterConfig) http.Handler {
 			},
 		)(handler)
 	}
-	handler = commonmw.CORS(handler)
+	// CORS middleware với configurable allowed origins
+	var allowedOrigins []string
+	if cfg.Config != nil {
+		allowedOrigins = cfg.Config.AllowedOrigins
+	}
+	handler = commonmw.CORS(allowedOrigins, handler)
 	handler = commonmw.ErrorHandler(handler)
 	handler = commonmw.CorrelationID(handler)
 
