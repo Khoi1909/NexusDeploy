@@ -25,29 +25,34 @@ interface UserInfo {
 export const authApi = {
   // Redirect to GitHub login
   loginWithGitHub: () => {
-    window.location.href = `${API_BASE_URL}/auth/github/login`;
+    // With NEXT_PUBLIC_API_URL=https://khqi.io.vn, API_BASE_URL = "https://khqi.io.vn"
+    // Need to add /api prefix for Traefik routing
+    const base = API_BASE_URL || "";
+    // Add /api if baseUrl doesn't end with /api
+    const apiPrefix = base.endsWith("/api") ? "" : "/api";
+    window.location.href = `${base}${apiPrefix}/auth/github/login`;
   },
 
   // Handle OAuth callback
   handleCallback: async (code: string): Promise<LoginResponse> => {
-    return apiClient.get<LoginResponse>(`/auth/github/callback?code=${code}`);
+    return apiClient.get<LoginResponse>(`/api/auth/github/callback?code=${code}`);
   },
 
   // Refresh tokens
   refreshToken: async (refreshToken: string): Promise<RefreshResponse> => {
-    return apiClient.post<RefreshResponse>("/auth/refresh", {
+    return apiClient.post<RefreshResponse>("/api/auth/refresh", {
       refresh_token: refreshToken,
     });
   },
 
   // Get current user info
   getCurrentUser: async (token: string): Promise<UserInfo> => {
-    return apiClient.get<UserInfo>("/auth/me", { token });
+    return apiClient.get<UserInfo>("/api/auth/me", { token });
   },
 
   // Logout
   logout: async (token: string): Promise<void> => {
-    return apiClient.post("/auth/logout", {}, { token });
+    return apiClient.post("/api/auth/logout", {}, { token });
   },
 
   // Update plan

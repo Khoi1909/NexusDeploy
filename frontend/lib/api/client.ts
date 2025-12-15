@@ -1,4 +1,9 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+import { useAuthStore } from "@/lib/store/authStore";
+
+// Use relative path if NEXT_PUBLIC_API_URL starts with /, otherwise use absolute URL
+// Default to relative path /api for production (routed through Traefik)
+const apiUrl = process.env.NEXT_PUBLIC_API_URL || "/api";
+const API_BASE_URL = apiUrl.startsWith("/") ? "" : apiUrl;
 
 interface RequestOptions extends RequestInit {
   token?: string;
@@ -32,12 +37,52 @@ class ApiClient {
       headers["Authorization"] = `Bearer ${token}`;
     }
 
-    const response = await fetch(`${this.baseUrl}${endpoint}`, {
+    // Normalize endpoint: ensure it starts with / if baseUrl is empty
+    // With NEXT_PUBLIC_API_URL=https://khqi.io.vn, baseUrl = "https://khqi.io.vn"
+    // All endpoints should include /api/ prefix to match Traefik routing
+    let normalizedEndpoint = endpoint;
+    if (this.baseUrl === "" && !endpoint.startsWith("/")) {
+      normalizedEndpoint = `/${endpoint}`;
+    }
+    
+    // If baseUrl doesn't end with /api, ensure endpoint has /api prefix
+    // This handles:
+    // - baseUrl = "https://khqi.io.vn" and endpoint = "/api/projects" → keep as is
+    if (this.baseUrl !== "" && !this.baseUrl.endsWith("/api") && !normalizedEndpoint.startsWith("/api")) {
+      normalizedEndpoint = `/api${normalizedEndpoint}`;
+    }
+    
+    // Remove duplicate /api prefix if baseUrl already ends with /api
+    if (this.baseUrl !== "" && this.baseUrl.endsWith("/api") && normalizedEndpoint.startsWith("/api/")) {
+      normalizedEndpoint = normalizedEndpoint.substring(4); // Remove "/api"
+    }
+
+    // Combine baseUrl and endpoint, ensuring no double slashes
+    const url = `${this.baseUrl}${normalizedEndpoint}`.replace(/([^:]\/)\/+/g, "$1");
+
+    const response = await fetch(url, {
       ...fetchOptions,
       headers,
     });
 
     if (!response.ok) {
+      // Handle 401/403 - unauthorized/forbidden (invalid or expired token)
+      if (response.status === 401 || response.status === 403) {
+        // Clear auth state immediately
+        const { logout } = useAuthStore.getState();
+        logout();
+        
+        // Redirect to homepage - use window.location for hard redirect
+        // This prevents any further execution and immediately kicks user out
+        if (typeof window !== "undefined") {
+          window.location.href = "/";
+        }
+        
+        // Throw error to prevent further execution
+        throw new Error("Authentication required");
+      }
+
+      // Handle other errors
       let errorMessage = `HTTP error ${response.status}`;
       let errorCode = "unknown_error";
       

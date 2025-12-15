@@ -35,6 +35,12 @@ export interface BuildLogsResponse {
   has_more: boolean;
 }
 
+export interface AnalysisResult {
+  analysis: string;
+  suggestions: string[];
+  cached: boolean;
+}
+
 export const buildsApi = {
   // List builds for a project with pagination
   listBuilds: async (
@@ -112,6 +118,19 @@ export const buildsApi = {
       `/api/projects/${projectId}/builds/logs`,
       { token }
     );
+  },
+
+  // Analyze build errors using AI
+  analyzeBuild: async (
+    token: string,
+    buildId: string
+  ): Promise<AnalysisResult> => {
+    const response = await apiClient.post<AnalysisResult>(
+      `/api/builds/${buildId}/analyze`,
+      {},
+      { token }
+    );
+    return response;
   },
 };
 
