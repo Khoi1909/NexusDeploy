@@ -5,9 +5,18 @@ import { GitBranch, Loader2 } from "lucide-react";
 
 export default function LoginPage() {
   useEffect(() => {
-    // Redirect to GitHub OAuth
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-    window.location.href = `${apiUrl}/auth/github/login`;
+    // Redirect to GitHub OAuth with redirect_url parameter
+    // Always use /api/auth/github/login for Traefik routing
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "/api";
+    const redirectUrl = encodeURIComponent(`${window.location.origin}/auth/callback`);
+    // Ensure /api prefix is included
+    const baseUrl = apiUrl.startsWith("/") 
+      ? `${window.location.origin}${apiUrl}`
+      : apiUrl;
+    // Add /api if baseUrl doesn't end with /api
+    const apiPrefix = baseUrl.endsWith("/api") ? "" : "/api";
+    const fullUrl = `${baseUrl}${apiPrefix}/auth/github/login?redirect_url=${redirectUrl}`;
+    window.location.href = fullUrl;
   }, []);
 
   return (
