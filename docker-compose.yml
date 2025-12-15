@@ -6,7 +6,7 @@ services:
     container_name: nexus_postgres
     environment:
       POSTGRES_USER: nexus
-      POSTGRES_PASSWORD: nexus_dev
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nexus_dev}
       POSTGRES_MULTIPLE_DATABASES: auth_db,project_db,build_db
     ports:
       - "5432:5432"
@@ -34,20 +34,67 @@ services:
       timeout: 3s
       retries: 5
 
+  ollama:
+    image: ollama/ollama:latest
+    container_name: nexus_ollama
+    ports:
+      - "11435:11434"
+    networks:
+      - nexus-network
+    volumes:
+      - ollama_models:/root/.ollama  # Persist models
+      - ./scripts/ollama-entrypoint.sh:/entrypoint.sh:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s  # Increased for model download time
+
   traefik:
-    image: traefik:v2.9
+    image: traefik:v3.6
     container_name: nexus_traefik
     command:
       - "--api.insecure=true"
       - "--api.dashboard=true"
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
-      - "--entrypoints.web.address=:77"
+      - "--providers.docker.network=nexus-network"
+      - "--providers.docker.watch=true"
+      - "--providers.docker.allowEmptyServices=true"
+      # Entrypoints
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      # HTTP -> HTTPS redirect
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+      # ACME Let's Encrypt
+      - "--certificatesresolvers.letsencrypt.acme.dnschallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.dnschallenge.provider=cloudflare"
+      - "--certificatesresolvers.letsencrypt.acme.email=${CLOUDFLARE_EMAIL}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+      - "--log.level=INFO"
+      - "--accesslog=true"
     ports:
-      - "666:80"
-      - "7070:8080" # Traefik Dashboard (internal 8080 → host 7070)
+      - "80:80"
+      - "443:443"
+      - "7070:8080"  # Traefik Dashboard (internal 8080 → host 7070)
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      - letsencrypt:/letsencrypt
+    environment:
+      - CLOUDFLARE_EMAIL=${CLOUDFLARE_EMAIL}
+      - CLOUDFLARE_DNS_API_TOKEN=${CLOUDFLARE_DNS_API_TOKEN}
     networks:
       - nexus-network
 
@@ -69,9 +116,31 @@ services:
       - AUTH_SERVICE_ADDR=auth-service:50051
       - PROJECT_SERVICE_ADDR=project-service:50052
       - REDIS_HOST=redis
+      - FRONTEND_URL=${FRONTEND_URL:-https://khqi.io.vn}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3001}
+    # Traefik labels to expose API routes
+    # Router for /api/* routes (projects, builds, deployments, etc.)
+    # Note: Do NOT strip /api prefix because API Gateway routes already include /api/
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.api-gateway.rule=Host(`localhost`) && PathPrefix(`/api`)"
+      # Router for /api/* routes
+      - "traefik.http.routers.api-gateway.rule=Host(`khqi.io.vn`) && PathPrefix(`/api`)"
+      - "traefik.http.routers.api-gateway.entrypoints=websecure"
+      - "traefik.http.routers.api-gateway.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.api-gateway.middlewares=api-headers"
+      # Router for /auth/* routes (GitHub OAuth)
+      - "traefik.http.routers.api-gateway-auth.rule=Host(`khqi.io.vn`) && PathPrefix(`/api/auth`)"
+      - "traefik.http.routers.api-gateway-auth.entrypoints=websecure"
+      - "traefik.http.routers.api-gateway-auth.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.api-gateway-auth.middlewares=api-auth-stripprefix,api-headers"
+      - "traefik.http.middlewares.api-auth-stripprefix.stripprefix.prefixes=/api"
+      # Router for /api/ws (WebSocket)
+      - "traefik.http.routers.api-gateway-ws.rule=Host(`khqi.io.vn`) && PathPrefix(`/api/ws`)"
+      - "traefik.http.routers.api-gateway-ws.entrypoints=websecure"
+      - "traefik.http.routers.api-gateway-ws.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.api-gateway-ws.middlewares=api-ws-stripprefix,api-headers"
+      - "traefik.http.middlewares.api-ws-stripprefix.stripprefix.prefixes=/api"
+      - "traefik.http.middlewares.api-headers.headers.customrequestheaders.X-Forwarded-Proto=https"
       - "traefik.http.services.api-gateway.loadbalancer.server.port=8000"
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8000/health"]
@@ -102,8 +171,8 @@ services:
       # GitHub OAuth - Thay bằng credentials của bạn
       - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
       - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
-      - GITHUB_REDIRECT_URL=http://localhost:8000/auth/github/callback
-      - FRONTEND_URL=$(FRONTEND_URL)
+      - GITHUB_REDIRECT_URL=https://khqi.io.vn/api/auth/github/callback
+      - FRONTEND_URL=${FRONTEND_URL:-https://khqi.io.vn}
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health"]
       interval: 30s
@@ -130,7 +199,7 @@ services:
       - DB_PASSWORD=nexus_dev
       - DB_NAME=project_db
       - REDIS_HOST=redis
-      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-default-dev-encryption-key-32b}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
       - GITHUB_WEBHOOK_CALLBACK_URL=http://localhost:8000/webhooks/github
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health"]
@@ -212,8 +281,8 @@ services:
     environment:
       - REDIS_HOST=redis
       - TRAEFIK_NETWORK=nexus-network
-      - TRAEFIK_ENTRYPOINT=web
-      - TRAEFIK_DOMAIN_SUFFIX=${TRAEFIK_DOMAIN_SUFFIX:-localhost}
+      - TRAEFIK_ENTRYPOINT=websecure
+      - TRAEFIK_DOMAIN_SUFFIX=${TRAEFIK_DOMAIN_SUFFIX:-mydomain.com}
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health"]
       interval: 30s
@@ -231,9 +300,17 @@ services:
     networks:
       - nexus-network
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+      build-service:
+        condition: service_started
     environment:
       - REDIS_HOST=redis
+      - BUILD_SERVICE_ADDR=build-service:50053
+      - LLM_API_URL=http://ollama:11434/api/generate
+      - LLM_MODEL=deepseek-coder
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health"]
       interval: 30s
@@ -261,40 +338,52 @@ services:
       retries: 3
 
   # ------------------ Frontend Service ------------------
-  # Commented out - running frontend separately
-  # frontend:
-  #   build:
-  #     context: ./frontend
-  #     dockerfile: Dockerfile
-  #     target: runner  # Production build
-  #   container_name: nexus_frontend
-  #   networks:
-  #     - nexus-network
-  #   ports:
-  #     - "3000:3000"
-  #   environment:
-  #     - NODE_ENV=production
-  #     - NEXT_PUBLIC_API_URL=http://localhost:8000
-  #     - NEXT_PUBLIC_WS_URL=ws://localhost:8007
-  #   depends_on:
-  #     api-gateway:
-  #       condition: service_started
-  #   labels:
-  #     - "traefik.enable=true"
-  #     - "traefik.http.routers.frontend.rule=Host(`localhost`)"
-  #     - "traefik.http.routers.frontend.entrypoints=web"
-  #     - "traefik.http.services.frontend.loadbalancer.server.port=3000"
-  #   healthcheck:
-  #     test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
-  #     interval: 30s
-  #     timeout: 5s
-  #     retries: 3
-  #     start_period: 10s
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: runner  # Production build
+      args:
+        - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-/api}
+        - NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL:-}
+    container_name: nexus_frontend
+    networks:
+      - nexus-network
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - API_URL=http://api-gateway:8000  # Internal docker network for server-side rewrites
+      # Client-side: use Next.js rewrites (/api) to proxy to internal API
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-/api}
+      - NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL:-}  # Empty = auto-detect from window.location
+    depends_on:
+      api-gateway:
+        condition: service_started
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=Host(`khqi.io.vn`)"
+      - "traefik.http.routers.frontend.entrypoints=websecure"
+      - "traefik.http.routers.frontend.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.frontend.priority=10"
+      - "traefik.http.routers.frontend.service=frontend"
+      - "traefik.http.services.frontend.loadbalancer.server.port=3001"
+      - "traefik.docker.network=nexus-network"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3001/ >/dev/null 2>&1 || curl -f http://127.0.0.1:3001/ >/dev/null 2>&1 || ps aux | grep -q '[n]ext-server' || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
 
 networks:
   nexus-network:
+    name: nexus-network
     driver: bridge
 
 volumes:
   postgres_data:
   runner_builds:
+  ollama_models:
+  letsencrypt:

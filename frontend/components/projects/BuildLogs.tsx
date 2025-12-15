@@ -23,12 +23,33 @@ export function BuildLogs({
   wsUrl,
 }: BuildLogsProps) {
   // Get WebSocket URL from env variable or use provided wsUrl
-  // Default to API Gateway WebSocket proxy (ws://localhost:8000/ws)
-  const defaultWsUrl =
-    typeof window !== "undefined"
-      ? process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000"
-      : "ws://localhost:8000";
-  const finalWsUrl = wsUrl || defaultWsUrl;
+  // Build WebSocket URL from current location if using relative path
+  const getWsUrl = () => {
+    if (wsUrl) return wsUrl;
+    
+    const envWsUrl = process.env.NEXT_PUBLIC_WS_URL;
+    if (!envWsUrl) {
+      // Default: use same origin with ws protocol
+      if (typeof window !== "undefined") {
+        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+        return `${protocol}//${window.location.host}/api/ws`;
+      }
+      return "";
+    }
+    
+    // If env URL is relative, convert to absolute
+    if (envWsUrl.startsWith("/")) {
+      if (typeof window !== "undefined") {
+        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+        return `${protocol}//${window.location.host}${envWsUrl}`;
+      }
+      return envWsUrl;
+    }
+    
+    return envWsUrl;
+  };
+  
+  const finalWsUrl = getWsUrl();
   const [logs, setLogs] = useState<BuildLog[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

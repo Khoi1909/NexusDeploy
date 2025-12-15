@@ -56,7 +56,8 @@ export class BuildLogsWebSocket {
         }
 
         const channel = `build_logs:${this.projectId}:${this.buildId}`;
-        const url = `${this.wsUrl}/ws?subscribe=${channel}`;
+        // wsUrl already includes /api/ws, so just append query params
+        const url = `${this.wsUrl}?subscribe=${channel}`;
 
         this.ws = new WebSocket(url);
         let isResolved = false;
