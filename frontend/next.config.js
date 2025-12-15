@@ -12,12 +12,17 @@ const nextConfig = {
   
   // Environment variables
   env: {
-    NEXT_PUBLIC_WS_URL: process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000',
+    // WebSocket URL - use relative path or actual domain in production
+    // Default empty, will be set via environment variable
+    NEXT_PUBLIC_WS_URL: process.env.NEXT_PUBLIC_WS_URL || '',
   },
   
   // API proxy to backend (development + production)
+  // Server-side rewrites use internal docker network service name
   async rewrites() {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://api-gateway:8000';
+    // Use internal service name for server-side rewrites (docker network)
+    // NEXT_PUBLIC_API_URL is for client-side, not used here
+    const apiUrl = process.env.API_URL || 'http://api-gateway:8000';
     return [
       {
         source: '/api/:path*',
