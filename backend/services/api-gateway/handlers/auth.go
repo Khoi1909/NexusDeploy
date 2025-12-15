@@ -107,18 +107,33 @@ func (h *AuthHandler) HandleGitHubCallback(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Redirect về frontend kèm token ở query
-	redirectBase := r.URL.Query().Get("redirect_uri")
+	// Ưu tiên: redirect_url từ response > redirect_uri query param > FRONTEND_URL env > request origin
+	redirectBase := resp.RedirectUrl
+	if redirectBase == "" {
+		redirectBase = r.URL.Query().Get("redirect_uri")
+	}
 	if redirectBase == "" {
 		redirectBase = os.Getenv("FRONTEND_URL")
 	}
 	if redirectBase == "" {
-		redirectBase = "http://localhost:3001"
+		// Auto-detect from request origin (scheme + host)
+		if r.Header.Get("X-Forwarded-Proto") != "" && r.Header.Get("X-Forwarded-Host") != "" {
+			redirectBase = fmt.Sprintf("%s://%s", r.Header.Get("X-Forwarded-Proto"), r.Header.Get("X-Forwarded-Host"))
+		} else if r.Header.Get("Referer") != "" {
+			// Extract origin from Referer header
+			if refererURL, err := url.Parse(r.Header.Get("Referer")); err == nil {
+				redirectBase = fmt.Sprintf("%s://%s", refererURL.Scheme, refererURL.Host)
+			}
+		}
+	}
+	if redirectBase == "" {
+		redirectBase = "https://khqi.io.vn"
 	}
 
 	target, err := url.Parse(redirectBase)
 	if err != nil {
-		log.Error().Err(err).Str("correlation_id", corrID).Msg("invalid redirect uri, fallback localhost:3002")
-		target, _ = url.Parse("http://localhost:3001")
+		log.Error().Err(err).Str("correlation_id", corrID).Msg("invalid redirect uri, fallback https://khqi.io.vn")
+		target, _ = url.Parse("https://khqi.io.vn")
 	}
 
 	// Nếu path rỗng hoặc root, mặc định /auth/callback

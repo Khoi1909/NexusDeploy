@@ -14,6 +14,7 @@ import (
 	grpcpkg "github.com/nexusdeploy/backend/pkg/grpc"
 	"github.com/nexusdeploy/backend/pkg/logger"
 	commonmw "github.com/nexusdeploy/backend/pkg/middleware"
+	aipb "github.com/nexusdeploy/backend/services/ai-service/proto"
 	"github.com/nexusdeploy/backend/services/api-gateway/handlers"
 	"github.com/nexusdeploy/backend/services/api-gateway/routes"
 	authpb "github.com/nexusdeploy/backend/services/auth-service/proto"
@@ -41,10 +42,13 @@ func main() {
 
 	// gRPC clients
 	authConn, err := grpcpkg.NewClient(ctx, grpcpkg.ClientConfig{
-		Address:     cfg.AuthServiceAddr,
-		Timeout:     5 * time.Second,
-		MaxRetries:  3,
-		ServiceName: "auth-service",
+		Address:            cfg.AuthServiceAddr,
+		Timeout:            5 * time.Second,
+		MaxRetries:         3,
+		ServiceName:        "auth-service",
+		TLSEnabled:         cfg.GRPCTLSEnabled,
+		TLSCertPath:        cfg.GRPCTLSCertPath,
+		InsecureSkipVerify: cfg.GRPCInsecureSkipVerify,
 	})
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to connect to auth service")
@@ -52,10 +56,13 @@ func main() {
 	defer authConn.Close()
 
 	projectConn, err := grpcpkg.NewClient(ctx, grpcpkg.ClientConfig{
-		Address:     cfg.ProjectServiceAddr,
-		Timeout:     5 * time.Second,
-		MaxRetries:  3,
-		ServiceName: "project-service",
+		Address:            cfg.ProjectServiceAddr,
+		Timeout:            5 * time.Second,
+		MaxRetries:         3,
+		ServiceName:        "project-service",
+		TLSEnabled:         cfg.GRPCTLSEnabled,
+		TLSCertPath:        cfg.GRPCTLSCertPath,
+		InsecureSkipVerify: cfg.GRPCInsecureSkipVerify,
 	})
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to connect to project service")
@@ -63,10 +70,13 @@ func main() {
 	defer projectConn.Close()
 
 	buildConn, err := grpcpkg.NewClient(ctx, grpcpkg.ClientConfig{
-		Address:     cfg.BuildServiceAddr,
-		Timeout:     10 * time.Second,
-		MaxRetries:  3,
-		ServiceName: "build-service",
+		Address:            cfg.BuildServiceAddr,
+		Timeout:            10 * time.Second,
+		MaxRetries:         3,
+		ServiceName:        "build-service",
+		TLSEnabled:         cfg.GRPCTLSEnabled,
+		TLSCertPath:        cfg.GRPCTLSCertPath,
+		InsecureSkipVerify: cfg.GRPCInsecureSkipVerify,
 	})
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to connect to build service")
@@ -74,25 +84,43 @@ func main() {
 	defer buildConn.Close()
 
 	deploymentConn, err := grpcpkg.NewClient(ctx, grpcpkg.ClientConfig{
-		Address:     cfg.DeploymentServiceAddr,
-		Timeout:     10 * time.Second,
-		MaxRetries:  3,
-		ServiceName: "deployment-service",
+		Address:            cfg.DeploymentServiceAddr,
+		Timeout:            10 * time.Second,
+		MaxRetries:         3,
+		ServiceName:        "deployment-service",
+		TLSEnabled:         cfg.GRPCTLSEnabled,
+		TLSCertPath:        cfg.GRPCTLSCertPath,
+		InsecureSkipVerify: cfg.GRPCInsecureSkipVerify,
 	})
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to connect to deployment service")
 	}
 	defer deploymentConn.Close()
 
+	aiConn, err := grpcpkg.NewClient(ctx, grpcpkg.ClientConfig{
+		Address:            cfg.AIServiceAddr,
+		Timeout:            10 * time.Second,
+		MaxRetries:         3,
+		ServiceName:        "ai-service",
+		TLSEnabled:         cfg.GRPCTLSEnabled,
+		TLSCertPath:        cfg.GRPCTLSCertPath,
+		InsecureSkipVerify: cfg.GRPCInsecureSkipVerify,
+	})
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to connect to ai service")
+	}
+	defer aiConn.Close()
+
 	authClient := authpb.NewAuthServiceClient(authConn)
 	projectClient := projectpb.NewProjectServiceClient(projectConn)
 	buildClient := buildpb.NewBuildServiceClient(buildConn)
 	deploymentClient := deploymentpb.NewDeploymentServiceClient(deploymentConn)
+	aiClient := aipb.NewAIServiceClient(aiConn)
 
 	// Handlers
 	authHandler := handlers.NewAuthHandler(authClient, projectClient)
 	projectHandler := handlers.NewProjectHandler(projectClient)
-	buildHandler := handlers.NewBuildHandler(buildClient)
+	buildHandler := handlers.NewBuildHandler(buildClient, aiClient)
 	deploymentHandler := handlers.NewDeploymentHandler(deploymentClient, buildClient, projectClient, authClient)
 
 	// Wire GetGitHubToken callback - Gateway fetches token from Auth Service

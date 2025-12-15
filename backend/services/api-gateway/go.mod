@@ -8,6 +8,7 @@ require (
 	github.com/nexusdeploy/backend/pkg/grpc v0.0.0
 	github.com/nexusdeploy/backend/pkg/logger v0.0.0
 	github.com/nexusdeploy/backend/pkg/middleware v0.0.0
+	github.com/nexusdeploy/backend/services/ai-service/proto v0.0.0
 	github.com/nexusdeploy/backend/services/auth-service/proto v0.0.0
 	github.com/nexusdeploy/backend/services/build-service/proto v0.0.0
 	github.com/nexusdeploy/backend/services/deployment-service/proto v0.0.0
@@ -44,6 +45,8 @@ replace github.com/nexusdeploy/backend/pkg/grpc => ../../pkg/grpc
 replace github.com/nexusdeploy/backend/pkg/logger => ../../pkg/logger
 
 replace github.com/nexusdeploy/backend/pkg/middleware => ../../pkg/middleware
+
+replace github.com/nexusdeploy/backend/services/ai-service/proto => ../ai-service/proto
 
 replace github.com/nexusdeploy/backend/services/auth-service/proto => ../auth-service/proto
 

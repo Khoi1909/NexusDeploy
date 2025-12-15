@@ -3,8 +3,10 @@ FROM golang:1.24-alpine AS builder
 
 WORKDIR /build
 
-# Install dependencies
-RUN apk add --no-cache git
+# Install dependencies including protoc and protoc-gen-go
+RUN apk add --no-cache git protobuf
+RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@latest && \
+    go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 
 # Copy go.mod and go.sum first for caching
 COPY services/api-gateway/go.mod services/api-gateway/go.sum* ./services/api-gateway/
@@ -12,11 +14,18 @@ COPY services/auth-service/proto/ ./services/auth-service/proto/
 COPY services/project-service/proto/ ./services/project-service/proto/
 COPY services/build-service/proto/ ./services/build-service/proto/
 COPY services/deployment-service/proto/ ./services/deployment-service/proto/
+COPY services/ai-service/proto/ ./services/ai-service/proto/
 COPY pkg/ ./pkg/
 
 # Download dependencies
 WORKDIR /build/services/api-gateway
 RUN go mod download
+
+# Generate proto files for auth-service (needed by api-gateway)
+WORKDIR /build/services/auth-service
+RUN protoc --go_out=. --go_opt=paths=source_relative \
+    --go-grpc_out=. --go-grpc_opt=paths=source_relative \
+    proto/auth.proto
 
 # Copy source code
 WORKDIR /build
