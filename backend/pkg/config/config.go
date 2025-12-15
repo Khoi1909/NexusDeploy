@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -52,9 +53,17 @@ type Config struct {
 	EncryptionKey       string // AES-256 key for secrets (Project Service)
 	MasterEncryptionKey string // Alias for EncryptionKey
 
-	// LLM API (cho AI Service)
-	LLMAPIKey string
+	// LLM API (cho AI Service - Ollama local)
 	LLMAPIURL string
+	LLMModel  string
+
+	// CORS
+	AllowedOrigins []string
+
+	// gRPC TLS
+	GRPCTLSEnabled         bool
+	GRPCTLSCertPath        string
+	GRPCInsecureSkipVerify bool
 
 	// Logging
 	LogLevel  string
@@ -99,8 +108,14 @@ func LoadConfig() (*Config, error) {
 		EncryptionKey:       getEnv("ENCRYPTION_KEY", getEnv("MASTER_ENCRYPTION_KEY", "")),
 		MasterEncryptionKey: getEnv("MASTER_ENCRYPTION_KEY", getEnv("ENCRYPTION_KEY", "")),
 
-		LLMAPIKey: getEnv("LLM_API_KEY", ""),
-		LLMAPIURL: getEnv("LLM_API_URL", ""),
+		LLMAPIURL: getEnv("LLM_API_URL", "http://ollama:11434/api/generate"),
+		LLMModel:  getEnv("LLM_MODEL", "deepseek-coder:6.7b-q4_0"),
+
+		AllowedOrigins: parseCommaSeparated(getEnv("ALLOWED_ORIGINS", "")),
+
+		GRPCTLSEnabled:         getEnvAsBool("GRPC_TLS_ENABLED", false),
+		GRPCTLSCertPath:        getEnv("GRPC_TLS_CERT_PATH", ""),
+		GRPCInsecureSkipVerify: getEnvAsBool("GRPC_INSECURE_SKIP_VERIFY", false),
 
 		LogLevel:  getEnv("LOG_LEVEL", "info"),
 		LogFormat: getEnv("LOG_FORMAT", "json"),
@@ -146,4 +161,30 @@ func (c *Config) GetDSN() string {
 // GetRedisAddr trả về địa chỉ Redis
 func (c *Config) GetRedisAddr() string {
 	return fmt.Sprintf("%s:%s", c.RedisHost, c.RedisPort)
+}
+
+// parseCommaSeparated parses comma-separated string into slice, trimming whitespace
+func parseCommaSeparated(s string) []string {
+	if s == "" {
+		return []string{}
+	}
+	parts := strings.Split(s, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
+}
+
+// getEnvAsBool lấy giá trị biến môi trường dạng bool hoặc trả về giá trị mặc định
+func getEnvAsBool(key string, defaultValue bool) bool {
+	if value := os.Getenv(key); value != "" {
+		if boolValue, err := strconv.ParseBool(value); err == nil {
+			return boolValue
+		}
+	}
+	return defaultValue
 }

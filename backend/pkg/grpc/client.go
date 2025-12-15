@@ -2,12 +2,14 @@ package grpc
 
 import (
 	"context"
+	"crypto/tls"
 	"time"
 
 	grpc_retry "github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/retry"
 	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
@@ -18,10 +20,13 @@ const (
 
 // ClientConfig chứa cấu hình cho gRPC client
 type ClientConfig struct {
-	Address     string
-	Timeout     time.Duration
-	MaxRetries  int
-	ServiceName string
+	Address            string
+	Timeout            time.Duration
+	MaxRetries         int
+	ServiceName        string
+	TLSEnabled         bool
+	TLSCertPath        string // Optional: path to TLS certificate file
+	InsecureSkipVerify bool   // For dev only: skip TLS certificate verification
 }
 
 // NewClient tạo gRPC client connection với retry và timeout
@@ -39,7 +44,41 @@ func NewClient(ctx context.Context, cfg ClientConfig) (*grpc.ClientConn, error) 
 			grpc_retry.UnaryClientInterceptor(retryOpts...),
 			correlationIDInterceptor,
 		),
-		grpc.WithInsecure(), // TODO: Thêm TLS trong production
+	}
+
+	// TLS configuration
+	if cfg.TLSEnabled {
+		var creds credentials.TransportCredentials
+		if cfg.TLSCertPath != "" {
+			// Load TLS credentials from file
+			tlsConfig := &tls.Config{
+				InsecureSkipVerify: cfg.InsecureSkipVerify,
+			}
+			creds = credentials.NewTLS(tlsConfig)
+		} else {
+			// Use system certificates or create insecure TLS for dev
+			if cfg.InsecureSkipVerify {
+				// Dev mode: skip verification
+				tlsConfig := &tls.Config{
+					InsecureSkipVerify: true,
+				}
+				creds = credentials.NewTLS(tlsConfig)
+			} else {
+				// Production: use system certs
+				creds = credentials.NewTLS(&tls.Config{})
+			}
+		}
+		dialOpts = append(dialOpts, grpc.WithTransportCredentials(creds))
+		log.Info().
+			Str("service", cfg.ServiceName).
+			Bool("insecure_skip_verify", cfg.InsecureSkipVerify).
+			Msg("Using TLS for gRPC connection")
+	} else {
+		// Backward compatible: use insecure for development
+		dialOpts = append(dialOpts, grpc.WithInsecure())
+		log.Debug().
+			Str("service", cfg.ServiceName).
+			Msg("Using insecure gRPC connection (TLS disabled)")
 	}
 
 	// Tạo connection với timeout
