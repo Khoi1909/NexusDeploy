@@ -45,14 +45,21 @@ export const useAuthStore = create<AuthState>()(
           user,
         }),
 
-      logout: () =>
+      logout: () => {
+        // Clear all auth state
         set({
           accessToken: null,
           refreshToken: null,
           user: null,
           isAuthenticated: false,
           isLoading: false,
-        }),
+        });
+        // Clear any legacy localStorage items if they exist
+        if (typeof window !== "undefined") {
+          localStorage.removeItem("nexus_token");
+          localStorage.removeItem("nexus_user");
+        }
+      },
 
       setLoading: (isLoading) =>
         set({

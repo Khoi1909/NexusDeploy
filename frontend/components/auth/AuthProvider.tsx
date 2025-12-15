@@ -1,46 +1,30 @@
 "use client";
 
-import { useEffect, ReactNode } from "react";
+import { ReactNode } from "react";
 import { useAuthStore } from "@/lib/store/authStore";
+import { Loader2 } from "lucide-react";
 
 interface AuthProviderProps {
   children: ReactNode;
 }
 
+/**
+ * AuthProvider ensures auth state is rehydrated before rendering children.
+ * Zustand persist middleware handles the actual localStorage sync,
+ * but we need to wait for isLoading to be false before rendering.
+ */
 export function AuthProvider({ children }: AuthProviderProps) {
-  const { token, user } = useAuthStore();
+  const { isLoading } = useAuthStore();
 
-  useEffect(() => {
-    // Check for token in localStorage on mount (for persistence)
-    if (typeof window !== "undefined") {
-      const storedToken = localStorage.getItem("nexus_token");
-      const storedUser = localStorage.getItem("nexus_user");
-
-      if (storedToken && storedUser && !token) {
-        try {
-          const parsedUser = JSON.parse(storedUser);
-          useAuthStore.getState().login(storedToken, parsedUser);
-        } catch (e) {
-          // Invalid stored data, clear it
-          localStorage.removeItem("nexus_token");
-          localStorage.removeItem("nexus_user");
-        }
-      }
-    }
-  }, [token]);
-
-  // Persist auth state to localStorage
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      if (token && user) {
-        localStorage.setItem("nexus_token", token);
-        localStorage.setItem("nexus_user", JSON.stringify(user));
-      } else {
-        localStorage.removeItem("nexus_token");
-        localStorage.removeItem("nexus_user");
-      }
-    }
-  }, [token, user]);
+  // Wait for auth state to be rehydrated from localStorage
+  // This prevents flash of wrong UI (e.g., showing dashboard button when logged out)
+  if (isLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   return <>{children}</>;
 }

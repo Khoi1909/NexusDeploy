@@ -9,9 +9,9 @@ const publicRoutes = ["/", "/login", "/auth/callback"];
 export function useAuth() {
   const router = useRouter();
   const pathname = usePathname();
-  const { token, user, logout } = useAuthStore();
+  const { accessToken, user, logout } = useAuthStore();
 
-  const isAuthenticated = !!token;
+  const isAuthenticated = !!accessToken;
   const isPublicRoute = publicRoutes.includes(pathname);
 
   useEffect(() => {
@@ -28,7 +28,7 @@ export function useAuth() {
 
   return {
     user,
-    token,
+    token: accessToken,
     isAuthenticated,
     isLoading: false,
     signOut,
@@ -37,14 +37,14 @@ export function useAuth() {
 
 export function useRequireAuth() {
   const router = useRouter();
-  const { token, user } = useAuthStore();
+  const { accessToken, user } = useAuthStore();
 
   useEffect(() => {
-    if (!token) {
+    if (!accessToken) {
       router.push("/login");
     }
-  }, [token, router]);
+  }, [accessToken, router]);
 
-  return { user, token, isAuthenticated: !!token };
+  return { user, token: accessToken, isAuthenticated: !!accessToken };
 }
 
