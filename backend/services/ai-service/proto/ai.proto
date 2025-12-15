@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package ai;
+
+option go_package = "github.com/nexusdeploy/backend/services/ai-service/proto";
+
+// AI Service - Error Analysis using LLM
+service AIService {
+  // Analyze build errors and provide suggestions
+  rpc AnalyzeBuild(AnalyzeBuildRequest) returns (AnalyzeBuildResponse);
+}
+
+// --- AnalyzeBuild ---
+message AnalyzeBuildRequest {
+  string build_id = 1;
+  string user_plan = 2; // "standard" or "premium"
+}
+
+message AnalyzeBuildResponse {
+  string analysis = 1;      // Detailed analysis of the error
+  repeated string suggestions = 2; // Actionable suggestions to fix the error
+  bool cached = 3;          // Whether the result was from cache
+  string error = 4;         // Error message if analysis failed
+}
