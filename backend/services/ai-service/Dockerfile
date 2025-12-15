@@ -6,6 +6,8 @@ WORKDIR /build
 RUN apk add --no-cache git
 
 COPY services/ai-service/go.mod services/ai-service/go.sum* ./services/ai-service/
+COPY services/ai-service/proto/ ./services/ai-service/proto/
+COPY services/build-service/proto/ ./services/build-service/proto/
 COPY pkg/ ./pkg/
 
 WORKDIR /build/services/ai-service
