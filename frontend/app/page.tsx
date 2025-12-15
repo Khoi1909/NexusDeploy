@@ -23,10 +23,23 @@ import {
   Sparkles,
   BarChart,
   PlayCircle,
+  Loader2,
 } from "lucide-react";
 
 export default function HomePage() {
-  const { isAuthenticated } = useAuthStore();
+  const { isAuthenticated, accessToken, isLoading } = useAuthStore();
+
+  // AuthProvider already handles isLoading at root level,
+  // but we add this check here as an extra safety measure
+  if (isLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  const isLoggedIn = isAuthenticated && accessToken;
 
   const stats = [
     { label: "Active Deployments", value: "10K+", icon: Rocket },
@@ -159,7 +172,7 @@ export default function HomePage() {
       {/* Fixed Background Container */}
       <div className="fixed inset-0 z-0">
         {/* Light Pillars Background */}
-        <LightPillars pillarsCount={7} />
+        <LightPillars />
 
         {/* Noise overlay */}
         <div className="absolute inset-0 bg-noise opacity-30 pointer-events-none" />
@@ -173,15 +186,7 @@ export default function HomePage() {
             <div className="flex items-center gap-3">
               <span className="text-3xl font-bold text-foreground">NexusDeploy</span>
             </div>
-            {isAuthenticated ? (
-              <Link
-                href="/dashboard"
-                className="inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-white transition-all duration-200 hover:bg-primary-600"
-              >
-                <LayoutDashboard className="h-4 w-4" />
-                Dashboard
-              </Link>
-            ) : (
+            {isLoggedIn ? null : (
               <Link
                 href="/login"
                 className="rounded-lg bg-surface-800 px-5 py-2.5 text-sm font-medium text-foreground transition-all duration-200 hover:bg-surface-700"
@@ -209,14 +214,25 @@ export default function HomePage() {
 
             {/* CTA Buttons */}
             <div className="flex flex-col gap-4 sm:flex-row mb-16 animate-slide-up" style={{ animationDelay: "0.2s" }}>
-              <Link
-                href="/login"
-                className="group inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-8 py-4 text-base font-semibold text-white shadow-lg shadow-primary/30 transition-all duration-300 hover:bg-primary-600 hover:shadow-xl hover:shadow-primary/40 hover:-translate-y-0.5"
-              >
-                <GitBranch className="h-5 w-5" />
-                Login with GitHub
-                <ArrowRight className="h-5 w-5 transition-transform group-hover:translate-x-1" />
-              </Link>
+              {isLoggedIn ? (
+                <Link
+                  href="/dashboard"
+                  className="group inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-8 py-4 text-base font-semibold text-white shadow-lg shadow-primary/30 transition-all duration-300 hover:bg-primary-600 hover:shadow-xl hover:shadow-primary/40 hover:-translate-y-0.5"
+                >
+                  <Rocket className="h-5 w-5" />
+                  Enter Dashboard
+                  <ArrowRight className="h-5 w-5 transition-transform group-hover:translate-x-1" />
+                </Link>
+              ) : (
+                <Link
+                  href="/login"
+                  className="group inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-8 py-4 text-base font-semibold text-white shadow-lg shadow-primary/30 transition-all duration-300 hover:bg-primary-600 hover:shadow-xl hover:shadow-primary/40 hover:-translate-y-0.5"
+                >
+                  <GitBranch className="h-5 w-5" />
+                  Login with GitHub
+                  <ArrowRight className="h-5 w-5 transition-transform group-hover:translate-x-1" />
+                </Link>
+              )}
               <Link
                 href="https://github.com/Khoi1909/NexusDeploy"
                 target="_blank"

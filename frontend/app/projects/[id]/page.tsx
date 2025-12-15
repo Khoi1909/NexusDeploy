@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
+import ReactMarkdown from "react-markdown";
 import { DotGrid } from "@/components/ui/DotGrid";
 import { Navbar } from "@/components/layout/Navbar";
 import { Sidebar } from "@/components/layout/Sidebar";
@@ -31,6 +32,8 @@ import {
   Loader2,
   XCircle,
   Plus,
+  Sparkles,
+  X,
 } from "lucide-react";
 
 type TabType = "overview" | "builds" | "settings" | "secrets";
@@ -110,6 +113,17 @@ export default function ProjectDetailPage() {
   const [newSecretName, setNewSecretName] = useState("");
   const [newSecretValue, setNewSecretValue] = useState("");
   const [isAddingSecret, setIsAddingSecret] = useState(false);
+
+  // AI Analysis state
+  const [analyzingBuildId, setAnalyzingBuildId] = useState<string | null>(null);
+  const [analysisResult, setAnalysisResult] = useState<{
+    buildId: string;
+    analysis: string;
+    suggestions: string[];
+    cached: boolean;
+  } | null>(null);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [showAnalysisModal, setShowAnalysisModal] = useState(false);
 
   useEffect(() => {
     const currentProjectId = params.id as string;
@@ -1459,15 +1473,65 @@ export default function ProjectDetailPage() {
                           isExpanded={expandedBuildId === build.id}
                         />
                         {expandedBuildId === build.id && accessToken && (
-                          <Card variant="elevated" className="ml-4">
-                            <BuildLogs
-                              key={`${build.id}-${logsClearedTimestamp}`} // Force remount when logs are cleared
-                              buildId={build.id}
-                              projectId={projectId}
-                              token={accessToken}
-                              buildStatus={build.status}
-                            />
-                          </Card>
+                          <div className="ml-4 space-y-3">
+                            {/* Tell me why button - only for failed builds */}
+                            {(build.status === "failed" || build.status === "deploy_failed") && (
+                              <Card variant="elevated" className="border-accent-amber/30">
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-2">
+                                    <AlertTriangle className="h-4 w-4 text-accent-amber" />
+                                    <span className="text-sm text-surface-400">
+                                      Build failed
+                                    </span>
+                                  </div>
+                                  <button
+                                    onClick={async () => {
+                                      if (!accessToken) return;
+                                      setAnalyzingBuildId(build.id);
+                                      setAnalysisError(null);
+                                      setShowAnalysisModal(true);
+                                      try {
+                                        const result = await buildsApi.analyzeBuild(accessToken, build.id);
+                                        setAnalysisResult({
+                                          buildId: build.id,
+                                          analysis: result.analysis,
+                                          suggestions: result.suggestions,
+                                          cached: result.cached,
+                                        });
+                                      } catch (err: any) {
+                                        setAnalysisError(err.message || "Failed to analyze build");
+                                      } finally {
+                                        setAnalyzingBuildId(null);
+                                      }
+                                    }}
+                                    disabled={analyzingBuildId === build.id}
+                                    className="inline-flex items-center gap-2 rounded-lg bg-accent-amber/10 px-4 py-2 text-sm font-medium text-accent-amber transition-colors hover:bg-accent-amber/20 disabled:opacity-50"
+                                  >
+                                    {analyzingBuildId === build.id ? (
+                                      <>
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                        Analyzing...
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Sparkles className="h-4 w-4" />
+                                        Tell me why
+                                      </>
+                                    )}
+                                  </button>
+                                </div>
+                              </Card>
+                            )}
+                            <Card variant="elevated">
+                              <BuildLogs
+                                key={`${build.id}-${logsClearedTimestamp}`} // Force remount when logs are cleared
+                                buildId={build.id}
+                                projectId={projectId}
+                                token={accessToken}
+                                buildStatus={build.status}
+                              />
+                            </Card>
+                          </div>
                         )}
                       </div>
                     ))}
@@ -1628,6 +1692,152 @@ export default function ProjectDetailPage() {
           </div>
         </main>
       </div>
+
+      {/* AI Analysis Modal */}
+      {showAnalysisModal && (
+        <>
+          <div
+            className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm"
+            onClick={() => {
+              setShowAnalysisModal(false);
+              setAnalysisResult(null);
+              setAnalysisError(null);
+            }}
+          />
+          <div className="fixed left-1/2 top-1/2 z-50 w-full max-w-2xl max-h-[90vh] -translate-x-1/2 -translate-y-1/2 transform">
+            <Card variant="elevated" className="border-primary/30 flex flex-col max-h-[90vh]">
+              <div className="p-6 flex flex-col flex-1 min-h-0 overflow-y-auto">
+                <div className="mb-4 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="h-5 w-5 text-primary" />
+                    <h3 className="text-lg font-semibold text-foreground">
+                      AI Error Analysis
+                    </h3>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setShowAnalysisModal(false);
+                      setAnalysisResult(null);
+                      setAnalysisError(null);
+                    }}
+                    className="rounded-lg p-1 text-surface-400 transition-colors hover:bg-surface-800 hover:text-foreground"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+
+                {analyzingBuildId && (
+                  <div className="flex flex-col items-center justify-center py-12">
+                    <Loader2 className="mb-4 h-8 w-8 animate-spin text-primary" />
+                    <p className="text-surface-400">Analyzing build errors...</p>
+                    <p className="mt-1 text-sm text-surface-500">
+                      This may take a few seconds
+                    </p>
+                  </div>
+                )}
+
+                {analysisError && !analyzingBuildId && (
+                  <div className="rounded-lg border border-accent-rose/30 bg-accent-rose/10 p-4">
+                    <div className="flex items-center gap-2 text-accent-rose">
+                      <AlertTriangle className="h-5 w-5" />
+                      <p className="font-medium">Analysis Failed</p>
+                    </div>
+                    <p className="mt-2 text-sm text-surface-400">{analysisError}</p>
+                  </div>
+                )}
+
+                {analysisResult && !analyzingBuildId && (
+                  <div className="space-y-4 flex-1 min-h-0">
+                    {analysisResult.cached && (
+                      <div className="rounded-lg border border-primary/30 bg-primary/10 px-3 py-2">
+                        <p className="text-xs text-primary">
+                          Cached result (from previous analysis)
+                        </p>
+                      </div>
+                    )}
+
+                    <div>
+                      <h4 className="mb-2 text-sm font-semibold text-foreground">
+                        Analysis
+                      </h4>
+                      <div className="rounded-lg border border-surface-700 bg-surface-900/50 p-4 overflow-y-auto max-h-[400px]">
+                        <div className="prose prose-invert prose-sm max-w-none text-surface-300">
+                          <ReactMarkdown
+                            components={{
+                              h2: ({node, ...props}) => (
+                                <h2 className="text-base font-semibold text-foreground mt-4 mb-2 first:mt-0" {...props} />
+                              ),
+                              p: ({node, ...props}) => (
+                                <p className="text-sm text-surface-300 mb-2" {...props} />
+                              ),
+                              ol: ({node, ...props}) => (
+                                <ol className="list-decimal list-outside space-y-2 text-sm text-surface-300 ml-6" {...props} />
+                              ),
+                              ul: ({node, ...props}) => (
+                                <ul className="list-disc list-outside space-y-2 text-sm text-surface-300 ml-6" {...props} />
+                              ),
+                              li: ({node, ...props}) => (
+                                <li className="text-sm text-surface-300 leading-relaxed" {...props} />
+                              ),
+                              code: ({node, inline, ...props}: any) => 
+                                inline ? (
+                                  <code className="px-1.5 py-0.5 rounded bg-surface-800 text-primary text-xs font-mono" {...props} />
+                                ) : (
+                                  <code className="block px-3 py-2 rounded bg-surface-800 text-surface-200 text-xs font-mono overflow-x-auto my-2" {...props} />
+                                ),
+                              pre: ({node, ...props}) => (
+                                <pre className="bg-surface-800 rounded p-3 overflow-x-auto my-2" {...props} />
+                              ),
+                            }}
+                          >
+                            {analysisResult.analysis}
+                          </ReactMarkdown>
+                        </div>
+                      </div>
+                    </div>
+
+                    {analysisResult.suggestions && analysisResult.suggestions.length > 0 && (
+                      <div>
+                        <h4 className="mb-2 text-sm font-semibold text-foreground">
+                          Suggestions
+                        </h4>
+                        <ul className="space-y-2">
+                          {analysisResult.suggestions.map((suggestion, index) => (
+                            <li
+                              key={index}
+                              className="flex gap-3 rounded-lg border border-surface-700 bg-surface-900/50 p-3"
+                            >
+                              <span className="flex-shrink-0 text-sm font-medium text-primary">
+                                {index + 1}.
+                              </span>
+                              <p className="flex-1 text-sm text-surface-300">
+                                {suggestion}
+                              </p>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    <div className="flex justify-end pt-4">
+                      <button
+                        onClick={() => {
+                          setShowAnalysisModal(false);
+                          setAnalysisResult(null);
+                          setAnalysisError(null);
+                        }}
+                        className="rounded-lg border border-surface-700 px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-surface-800"
+                      >
+                        Close
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </Card>
+          </div>
+        </>
+      )}
 
       {/* Delete Confirmation Modal */}
       {showDeleteConfirm && (
