@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math/rand"
+	"net"
 	"os"
 	"strings"
 	"sync"
@@ -675,13 +677,43 @@ func (e *Executor) allocatePort() (int32, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	for p := e.portRangeStart; p <= e.portRangeEnd; p++ {
-		if !e.usedPorts[p] {
-			e.usedPorts[p] = true
-			return p, nil
+	// First, try to allocate a random port to reduce collisions
+	for i := 0; i < 100; i++ {
+		port := e.portRangeStart + int32(rand.Intn(int(e.portRangeEnd-e.portRangeStart+1)))
+		if !e.usedPorts[port] {
+			// Check if the port is actually free on the host
+			if isPortAvailable(port) {
+				e.usedPorts[port] = true
+				e.log.Debug().Int32("port", port).Msg("Allocated random port")
+				return port, nil
+			}
 		}
 	}
+
+	e.log.Warn().Msg("Random port allocation failed after 100 attempts, falling back to sequential scan")
+
+	// Fallback to sequential scan if random allocation fails
+	for p := e.portRangeStart; p <= e.portRangeEnd; p++ {
+		if !e.usedPorts[p] {
+			if isPortAvailable(p) {
+				e.usedPorts[p] = true
+				e.log.Debug().Int32("port", p).Msg("Allocated sequential port")
+				return p, nil
+			}
+		}
+	}
+
 	return 0, fmt.Errorf("no available ports in range %d-%d", e.portRangeStart, e.portRangeEnd)
+}
+
+// isPortAvailable checks if a TCP port is available on the host
+func isPortAvailable(port int32) bool {
+	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	if err != nil {
+		return false // Port is likely in use
+	}
+	ln.Close()
+	return true // Port is available
 }
 
 // releasePort frees a previously allocated port

@@ -133,3 +133,5 @@ cache/
 
 .cursor/
 /report/
+.gemini/
+.specify/

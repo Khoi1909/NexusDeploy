@@ -38,6 +38,7 @@ export const useAuthStore = create<AuthState>()(
           refreshToken,
           isAuthenticated: true,
           isLoading: false,
+          user: null, // Clear previous user data
         }),
 
       setUser: (user) =>

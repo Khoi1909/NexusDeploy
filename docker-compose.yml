@@ -55,11 +55,12 @@ services:
       - NVIDIA_VISIBLE_DEVICES=all
     entrypoint: ["/bin/sh", "/entrypoint.sh"]
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      test: ["CMD", "bash", "-c", "curl -f http://localhost:11434/api/tags | grep deepseek-coder"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 120s  # Increased for model download time
+      start_period: 300s  # Increased for model download time
+
 
   traefik:
     image: traefik:v3.6
@@ -303,7 +304,7 @@ services:
       redis:
         condition: service_healthy
       ollama:
-        condition: service_healthy
+        condition: service_started
       build-service:
         condition: service_started
     environment:

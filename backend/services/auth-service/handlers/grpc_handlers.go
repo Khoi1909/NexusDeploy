@@ -218,6 +218,11 @@ func (s *AuthServiceServer) ValidateToken(ctx context.Context, req *pb.ValidateT
 		}
 	}
 
+	log.Info().
+		Str("correlation_id", corrID).
+		Str("user_id", claims.UserID).
+		Msg("Token validated successfully")
+
 	return &pb.ValidateTokenResponse{
 		Valid:     true,
 		UserId:    claims.UserID,
